@@ -30,8 +30,9 @@ export function BotDetailPage() {
   }
 
   async function loadChannels() {
-    const all = await api.listChannels();
-    setChannels((all || []).filter((c: any) => c.bot_id === id));
+    if (!id) return;
+    const all = await api.listChannels(id);
+    setChannels(all || []);
   }
 
   async function loadMessages() {
@@ -165,7 +166,7 @@ function ChannelsTab({ botId, channels, onRefresh }: { botId: string; channels: 
 
   return (
     <div className="space-y-3 mt-4">
-      {channels.map((ch) => <ChannelRow key={ch.id} channel={ch} onRefresh={onRefresh} />)}
+      {channels.map((ch) => <ChannelRow key={ch.id} botId={botId} channel={ch} onRefresh={onRefresh} />)}
       {creating ? (
         <form onSubmit={handleCreate} className="space-y-2">
           <div className="flex gap-2">
@@ -271,13 +272,13 @@ function WsProtocolDocs() {
 
       <div>
         <p className="font-medium text-foreground mt-3 mb-1">测试命令</p>
-        <pre className="bg-card p-2 rounded overflow-x-auto">node example/ws-test.mjs "ws://host:port/api/ws?key=API_KEY"</pre>
+        <pre className="bg-card p-2 rounded overflow-x-auto">node example/ws-test.mjs "ws://host:port/api/v1/connect?key=API_KEY"</pre>
       </div>
     </div>
   );
 }
 
-function ChannelRow({ channel, onRefresh }: { channel: any; onRefresh: () => void }) {
+function ChannelRow({ botId, channel, onRefresh }: { botId: string; channel: any; onRefresh: () => void }) {
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedWs, setCopiedWs] = useState(false);
   const [showLive, setShowLive] = useState(false);
@@ -286,11 +287,11 @@ function ChannelRow({ channel, onRefresh }: { channel: any; onRefresh: () => voi
   const [handleVal, setHandleVal] = useState(channel.handle || "");
 
   const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${wsProto}//${location.host}/api/ws?key=${channel.api_key}`;
+  const wsUrl = `${wsProto}//${location.host}/api/v1/connect?key=${channel.api_key}`;
   const aiEnabled = channel.ai_config?.enabled;
 
   async function saveHandle() {
-    await api.updateChannel(channel.id, { handle: handleVal });
+    await api.updateChannel(botId, channel.id, { handle: handleVal });
     setEditingHandle(false);
     onRefresh();
   }
@@ -344,10 +345,10 @@ function ChannelRow({ channel, onRefresh }: { channel: any; onRefresh: () => voi
           <Button variant={showLive ? "default" : "ghost"} size="sm" onClick={() => setShowLive(!showLive)} title="实时监听">
             <Radio className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={async () => { if (confirm("重新生成 Key？")) { await api.rotateKey(channel.id); onRefresh(); } }}>
+          <Button variant="ghost" size="sm" onClick={async () => { if (confirm("重新生成 Key？")) { await api.rotateKey(botId, channel.id); onRefresh(); } }}>
             <RotateCw className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={async () => { if (confirm("删除？")) { await api.deleteChannel(channel.id); onRefresh(); } }}>
+          <Button variant="ghost" size="sm" onClick={async () => { if (confirm("删除？")) { await api.deleteChannel(botId, channel.id); onRefresh(); } }}>
             <Trash2 className="w-3.5 h-3.5 text-destructive" />
           </Button>
         </div>
@@ -356,13 +357,13 @@ function ChannelRow({ channel, onRefresh }: { channel: any; onRefresh: () => voi
       <CopyRow label="API Key" value={channel.api_key} copied={copiedKey} onCopy={copyKey} />
       <CopyRow label="WebSocket" value={wsUrl} copied={copiedWs} onCopy={copyWs} />
 
-      {showAI && <AIConfigPanel channelId={channel.id} config={channel.ai_config} onSaved={onRefresh} />}
+      {showAI && <AIConfigPanel botId={botId} channelId={channel.id} config={channel.ai_config} onSaved={onRefresh} />}
       {showLive && <LivePanel wsUrl={wsUrl} onClose={() => setShowLive(false)} />}
     </div>
   );
 }
 
-function AIConfigPanel({ channelId, config, onSaved }: { channelId: string; config: any; onSaved: () => void }) {
+function AIConfigPanel({ botId, channelId, config, onSaved }: { botId: string; channelId: string; config: any; onSaved: () => void }) {
   const [enabled, setEnabled] = useState(config?.enabled || false);
   const [source, setSource] = useState(config?.source || "builtin");
   const [baseUrl, setBaseUrl] = useState(config?.base_url || "");
@@ -396,7 +397,7 @@ function AIConfigPanel({ channelId, config, onSaved }: { channelId: string; conf
         cfg.model = model || "gpt-4o-mini";
         setBaseUrl(cfg.base_url);
       }
-      await api.updateChannel(channelId, { ai_config: cfg });
+      await api.updateChannel(botId, channelId, { ai_config: cfg });
       onSaved();
     } catch (err: any) {
       setError(err.message);

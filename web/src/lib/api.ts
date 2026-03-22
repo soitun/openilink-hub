@@ -21,8 +21,14 @@ export const api = {
     request("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   logout: () => request("/api/auth/logout", { method: "POST" }),
   oauthProviders: () => request<{ providers: string[] }>("/api/auth/oauth/providers"),
-  me: () => request<{ id: string; username: string; display_name: string; role: string }>("/api/auth/me"),
-  features: () => request<{ ai: boolean }>("/api/features"),
+  me: () => request<{ id: string; username: string; display_name: string; role: string }>("/api/me"),
+  info: () => request<{ ai: boolean }>("/api/info"),
+
+  // Profile
+  updateProfile: (data: { display_name?: string; email?: string }) =>
+    request("/api/me/profile", { method: "PUT", body: JSON.stringify(data) }),
+  changePassword: (data: { old_password: string; new_password: string }) =>
+    request("/api/me/password", { method: "PUT", body: JSON.stringify(data) }),
 
   // Bots
   listBots: () => request<any[]>("/api/bots"),
@@ -33,25 +39,25 @@ export const api = {
     request(`/api/bots/${id}/name`, { method: "PUT", body: JSON.stringify({ name }) }),
   botContacts: (id: string) => request<any[]>(`/api/bots/${id}/contacts`),
 
-  // Channels
-  listChannels: () => request<any[]>("/api/channels"),
-  createChannel: (bot_id: string, name: string, handle?: string) =>
-    request("/api/channels", { method: "POST", body: JSON.stringify({ bot_id, name, handle: handle || "" }) }),
-  updateChannel: (id: string, data: any) =>
-    request(`/api/channels/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  deleteChannel: (id: string) => request(`/api/channels/${id}`, { method: "DELETE" }),
-  rotateKey: (id: string) => request<{ api_key: string }>(`/api/channels/${id}/rotate-key`, { method: "POST" }),
+  // Channels (under bots)
+  listChannels: (botId: string) => request<any[]>(`/api/bots/${botId}/channels`),
+  createChannel: (botId: string, name: string, handle?: string) =>
+    request(`/api/bots/${botId}/channels`, { method: "POST", body: JSON.stringify({ name, handle: handle || "" }) }),
+  updateChannel: (botId: string, id: string, data: any) =>
+    request(`/api/bots/${botId}/channels/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteChannel: (botId: string, id: string) => request(`/api/bots/${botId}/channels/${id}`, { method: "DELETE" }),
+  rotateKey: (botId: string, id: string) => request<{ api_key: string }>(`/api/bots/${botId}/channels/${id}/rotate-key`, { method: "POST" }),
 
   // OAuth accounts
-  oauthAccounts: () => request<any[]>("/api/auth/linked-accounts"),
+  oauthAccounts: () => request<any[]>("/api/me/linked-accounts"),
   unlinkOAuth: (provider: string) =>
-    request(`/api/auth/linked-accounts/${provider}`, { method: "DELETE" }),
+    request(`/api/me/linked-accounts/${provider}`, { method: "DELETE" }),
 
   // Stats
-  stats: () => request<any>("/api/stats"),
+  stats: () => request<any>("/api/bots/stats"),
 
-  // Messages
-  messages: (bot_id: string, limit = 50) => request<any[]>(`/api/messages?bot_id=${bot_id}&limit=${limit}`),
+  // Messages (under bots)
+  messages: (botId: string, limit = 50) => request<any[]>(`/api/bots/${botId}/messages?limit=${limit}`),
 
   // Admin: system config
   getOAuthConfig: () => request<Record<string, any>>("/api/admin/config/oauth"),
@@ -66,8 +72,8 @@ export const api = {
     request("/api/admin/config/ai", { method: "PUT", body: JSON.stringify(data) }),
   deleteAIConfig: () => request("/api/admin/config/ai", { method: "DELETE" }),
 
-  // Users (admin)
-  listUsers: () => request<any[]>("/api/users"),
-  createUser: (data: any) => request("/api/users", { method: "POST", body: JSON.stringify(data) }),
-  deleteUser: (id: string) => request(`/api/users/${id}`, { method: "DELETE" }),
+  // Admin: Users
+  listUsers: () => request<any[]>("/api/admin/users"),
+  createUser: (data: any) => request("/api/admin/users", { method: "POST", body: JSON.stringify(data) }),
+  deleteUser: (id: string) => request(`/api/admin/users/${id}`, { method: "DELETE" }),
 };

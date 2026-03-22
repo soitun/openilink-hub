@@ -10,19 +10,16 @@ import (
 
 func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
+	botID := r.PathValue("id")
 
-	// Get user's bot IDs, then list channels for those bots
-	bots, err := s.DB.ListBotsByUser(userID)
-	if err != nil {
-		jsonError(w, "list failed", http.StatusInternalServerError)
+	// Verify bot ownership
+	bot, err := s.DB.GetBot(botID)
+	if err != nil || bot.UserID != userID {
+		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
-	botIDs := make([]string, len(bots))
-	for i, b := range bots {
-		botIDs[i] = b.ID
-	}
 
-	channels, err := s.DB.ListChannelsByBotIDs(botIDs)
+	channels, err := s.DB.ListChannelsByBotIDs([]string{botID})
 	if err != nil {
 		jsonError(w, "list failed", http.StatusInternalServerError)
 		return
@@ -33,27 +30,27 @@ func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
+	botID := r.PathValue("id")
 
 	var req struct {
-		BotID      string               `json:"bot_id"`
 		Name       string               `json:"name"`
 		Handle     string               `json:"handle"`
 		FilterRule *database.FilterRule  `json:"filter_rule,omitempty"`
 		AIConfig   *database.AIConfig   `json:"ai_config,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BotID == "" || req.Name == "" {
-		jsonError(w, "bot_id and name required", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		jsonError(w, "name required", http.StatusBadRequest)
 		return
 	}
 
 	// Verify bot ownership
-	bot, err := s.DB.GetBot(req.BotID)
+	bot, err := s.DB.GetBot(botID)
 	if err != nil || bot.UserID != userID {
 		jsonError(w, "bot not found", http.StatusNotFound)
 		return
 	}
 
-	ch, err := s.DB.CreateChannel(req.BotID, req.Name, req.Handle, req.FilterRule, req.AIConfig)
+	ch, err := s.DB.CreateChannel(botID, req.Name, req.Handle, req.FilterRule, req.AIConfig)
 	if err != nil {
 		jsonError(w, "create failed", http.StatusInternalServerError)
 		return
@@ -65,18 +62,19 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	cid := r.PathValue("cid")
 	userID := auth.UserIDFromContext(r.Context())
+	botID := r.PathValue("id")
 
-	ch, err := s.DB.GetChannel(id)
-	if err != nil {
+	// Verify bot ownership
+	bot, err := s.DB.GetBot(botID)
+	if err != nil || bot.UserID != userID {
 		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
 
-	// Verify ownership via bot
-	bot, err := s.DB.GetBot(ch.BotID)
-	if err != nil || bot.UserID != userID {
+	ch, err := s.DB.GetChannel(cid)
+	if err != nil || ch.BotID != botID {
 		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -114,7 +112,7 @@ func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 		enabled = *req.Enabled
 	}
 
-	if err := s.DB.UpdateChannel(id, name, handle, filter, ai, enabled); err != nil {
+	if err := s.DB.UpdateChannel(cid, name, handle, filter, ai, enabled); err != nil {
 		jsonError(w, "update failed", http.StatusInternalServerError)
 		return
 	}
@@ -122,23 +120,24 @@ func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	cid := r.PathValue("cid")
 	userID := auth.UserIDFromContext(r.Context())
+	botID := r.PathValue("id")
 
-	ch, err := s.DB.GetChannel(id)
-	if err != nil {
-		jsonError(w, "not found", http.StatusNotFound)
-		return
-	}
-
-	// Verify ownership via bot
-	bot, err := s.DB.GetBot(ch.BotID)
+	// Verify bot ownership
+	bot, err := s.DB.GetBot(botID)
 	if err != nil || bot.UserID != userID {
 		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
 
-	if err := s.DB.DeleteChannel(id); err != nil {
+	ch, err := s.DB.GetChannel(cid)
+	if err != nil || ch.BotID != botID {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	if err := s.DB.DeleteChannel(cid); err != nil {
 		jsonError(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
@@ -146,23 +145,24 @@ func (s *Server) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	cid := r.PathValue("cid")
 	userID := auth.UserIDFromContext(r.Context())
+	botID := r.PathValue("id")
 
-	ch, err := s.DB.GetChannel(id)
-	if err != nil {
-		jsonError(w, "not found", http.StatusNotFound)
-		return
-	}
-
-	// Verify ownership via bot
-	bot, err := s.DB.GetBot(ch.BotID)
+	// Verify bot ownership
+	bot, err := s.DB.GetBot(botID)
 	if err != nil || bot.UserID != userID {
 		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
 
-	newKey, err := s.DB.RotateChannelKey(id)
+	ch, err := s.DB.GetChannel(cid)
+	if err != nil || ch.BotID != botID {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	newKey, err := s.DB.RotateChannelKey(cid)
 	if err != nil {
 		jsonError(w, "rotate failed", http.StatusInternalServerError)
 		return

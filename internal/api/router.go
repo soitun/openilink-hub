@@ -57,28 +57,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", s.handleOAuthCallback)
 
 	// --- Public info ---
-	mux.HandleFunc("GET /api/features", s.handleFeatures)
+	mux.HandleFunc("GET /api/info", s.handleInfo)
 
 	// --- Channel API (api_key auth) ---
-	mux.HandleFunc("GET /api/ws", s.handleWebSocket)
-	mux.HandleFunc("GET /api/channel/messages", s.handleChannelMessages)
-	mux.HandleFunc("POST /api/channel/send", s.handleChannelSend)
-	mux.HandleFunc("POST /api/channel/typing", s.handleChannelTyping)
-	mux.HandleFunc("POST /api/channel/config", s.handleChannelConfig)
-	mux.HandleFunc("GET /api/channel/status", s.handleChannelStatus)
+	mux.HandleFunc("GET /api/v1/connect", s.handleWebSocket)
+	mux.HandleFunc("GET /api/v1/messages", s.handleChannelMessages)
+	mux.HandleFunc("POST /api/v1/send", s.handleChannelSend)
+	mux.HandleFunc("POST /api/v1/typing", s.handleChannelTyping)
+	mux.HandleFunc("POST /api/v1/config", s.handleChannelConfig)
+	mux.HandleFunc("GET /api/v1/status", s.handleChannelStatus)
 
 	// --- Protected routes ---
 	protected := http.NewServeMux()
 
 	// Profile
-	protected.HandleFunc("GET /api/auth/me", s.handleMe)
-	protected.HandleFunc("PUT /api/auth/profile", s.handleUpdateProfile)
-	protected.HandleFunc("PUT /api/auth/password", s.handleChangePassword)
+	protected.HandleFunc("GET /api/me", s.handleMe)
+	protected.HandleFunc("PUT /api/me/profile", s.handleUpdateProfile)
+	protected.HandleFunc("PUT /api/me/password", s.handleChangePassword)
 
 	// OAuth account binding (authenticated)
-	protected.HandleFunc("GET /api/auth/linked-accounts", s.handleOAuthAccounts)
-	protected.HandleFunc("GET /api/auth/linked-accounts/{provider}/bind", s.handleOAuthBind)
-	protected.HandleFunc("DELETE /api/auth/linked-accounts/{provider}", s.handleOAuthUnbind)
+	protected.HandleFunc("GET /api/me/linked-accounts", s.handleOAuthAccounts)
+	protected.HandleFunc("GET /api/me/linked-accounts/{provider}/bind", s.handleOAuthBind)
+	protected.HandleFunc("DELETE /api/me/linked-accounts/{provider}", s.handleOAuthUnbind)
 
 	// Bots
 	protected.HandleFunc("GET /api/bots", s.handleListBots)
@@ -87,29 +87,29 @@ func (s *Server) Handler() http.Handler {
 	protected.HandleFunc("POST /api/bots/{id}/reconnect", s.handleReconnect)
 	protected.HandleFunc("DELETE /api/bots/{id}", s.handleDeleteBot)
 
-	// Channels (formerly sublevels)
-	protected.HandleFunc("GET /api/channels", s.handleListChannels)
-	protected.HandleFunc("POST /api/channels", s.handleCreateChannel)
-	protected.HandleFunc("PUT /api/channels/{id}", s.handleUpdateChannel)
-	protected.HandleFunc("DELETE /api/channels/{id}", s.handleDeleteChannel)
-	protected.HandleFunc("POST /api/channels/{id}/rotate-key", s.handleRotateKey)
+	// Channels (under bots)
+	protected.HandleFunc("GET /api/bots/{id}/channels", s.handleListChannels)
+	protected.HandleFunc("POST /api/bots/{id}/channels", s.handleCreateChannel)
+	protected.HandleFunc("PUT /api/bots/{id}/channels/{cid}", s.handleUpdateChannel)
+	protected.HandleFunc("DELETE /api/bots/{id}/channels/{cid}", s.handleDeleteChannel)
+	protected.HandleFunc("POST /api/bots/{id}/channels/{cid}/rotate-key", s.handleRotateKey)
 
 	// Bot stats, contacts, send
-	protected.HandleFunc("GET /api/stats", s.handleStats)
+	protected.HandleFunc("GET /api/bots/stats", s.handleStats)
 	protected.HandleFunc("GET /api/bots/{id}/contacts", s.handleBotContacts)
 	protected.HandleFunc("PUT /api/bots/{id}/name", s.handleUpdateBotName)
 	protected.HandleFunc("POST /api/bots/{id}/send", s.handleBotSend)
 
-	// Messages
-	protected.HandleFunc("GET /api/messages", s.handleListMessages)
+	// Messages (under bots)
+	protected.HandleFunc("GET /api/bots/{id}/messages", s.handleListMessages)
 
 	// --- Admin: user management ---
-	protected.HandleFunc("GET /api/users", s.requireAdmin(s.handleListUsers))
-	protected.HandleFunc("POST /api/users", s.requireAdmin(s.handleCreateUser))
-	protected.HandleFunc("PUT /api/users/{id}/role", s.requireAdmin(s.handleUpdateUserRole))
-	protected.HandleFunc("PUT /api/users/{id}/status", s.requireAdmin(s.handleUpdateUserStatus))
-	protected.HandleFunc("PUT /api/users/{id}/password", s.requireAdmin(s.handleResetUserPassword))
-	protected.HandleFunc("DELETE /api/users/{id}", s.requireAdmin(s.handleDeleteUser))
+	protected.HandleFunc("GET /api/admin/users", s.requireAdmin(s.handleListUsers))
+	protected.HandleFunc("POST /api/admin/users", s.requireAdmin(s.handleCreateUser))
+	protected.HandleFunc("PUT /api/admin/users/{id}/role", s.requireAdmin(s.handleUpdateUserRole))
+	protected.HandleFunc("PUT /api/admin/users/{id}/status", s.requireAdmin(s.handleUpdateUserStatus))
+	protected.HandleFunc("PUT /api/admin/users/{id}/password", s.requireAdmin(s.handleResetUserPassword))
+	protected.HandleFunc("DELETE /api/admin/users/{id}", s.requireAdmin(s.handleDeleteUser))
 
 	// --- Admin: system config ---
 	protected.HandleFunc("GET /api/admin/config/oauth", s.requireAdmin(s.handleGetOAuthConfig))

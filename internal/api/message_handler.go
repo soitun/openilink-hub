@@ -10,11 +10,7 @@ import (
 
 func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
-	botID := r.URL.Query().Get("bot_id")
-	if botID == "" {
-		jsonError(w, "bot_id required", http.StatusBadRequest)
-		return
-	}
+	botID := r.PathValue("id")
 
 	// Verify bot ownership
 	bot, err := s.DB.GetBot(botID)

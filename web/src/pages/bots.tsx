@@ -21,14 +21,20 @@ export function BotsPage() {
   const [enableAI, setEnableAI] = useState(false);
 
   async function load() {
-    const [b, c] = await Promise.all([api.listBots(), api.listChannels()]);
+    const b = await api.listBots();
     setBots(b || []);
-    setChannels(c || []);
+    // Load channels for all bots
+    const allChannels: any[] = [];
+    for (const bot of (b || [])) {
+      const chs = await api.listChannels(bot.id);
+      allChannels.push(...(chs || []));
+    }
+    setChannels(allChannels);
   }
 
   useEffect(() => {
     load();
-    api.features().then((f) => { setHasGlobalAI(f.ai); setEnableAI(f.ai); }).catch(() => {});
+    api.info().then((f) => { setHasGlobalAI(f.ai); setEnableAI(f.ai); }).catch(() => {});
   }, []);
 
   async function startBind() {

@@ -193,7 +193,7 @@ func (e *testEnv) login(username, password string) {
 
 func (e *testEnv) userID() string {
 	e.t.Helper()
-	_, me := e.get("/api/auth/me")
+	_, me := e.get("/api/me")
 	return me["id"].(string)
 }
 
@@ -212,7 +212,7 @@ func (e *testEnv) createBotForUser(name string) *database.Bot {
 
 func (e *testEnv) connectWS(t *testing.T, apiKey string) *websocket.Conn {
 	t.Helper()
-	wsURL := "ws" + e.srv.URL[4:] + "/api/ws?key=" + apiKey
+	wsURL := "ws" + e.srv.URL[4:] + "/api/v1/connect?key=" + apiKey
 	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("ws dial: %v", err)
@@ -307,7 +307,7 @@ func TestRegisterAndLogin(t *testing.T) {
 
 	// First user → admin
 	env.register("admin", "password123")
-	code, me := env.get("/api/auth/me")
+	code, me := env.get("/api/me")
 	assertCode(t, "GET /me", code, 200)
 	if me["role"] != "admin" {
 		t.Errorf("first user role = %v, want admin", me["role"])
@@ -315,12 +315,12 @@ func TestRegisterAndLogin(t *testing.T) {
 
 	// Logout
 	env.post("/api/auth/logout", nil)
-	code, _ = env.get("/api/auth/me")
+	code, _ = env.get("/api/me")
 	assertCode(t, "after logout", code, 401)
 
 	// Login
 	env.login("admin", "password123")
-	code, _ = env.get("/api/auth/me")
+	code, _ = env.get("/api/me")
 	assertCode(t, "after login", code, 200)
 
 	// Wrong password
@@ -330,7 +330,7 @@ func TestRegisterAndLogin(t *testing.T) {
 
 	// Second user → member
 	env.register("member1", "password123")
-	_, me = env.get("/api/auth/me")
+	_, me = env.get("/api/me")
 	if me["role"] != "member" {
 		t.Errorf("second user role = %v, want member", me["role"])
 	}
@@ -361,13 +361,13 @@ func TestProfileUpdate(t *testing.T) {
 
 	env.register("profileuser", "password123")
 
-	code, _ := env.put("/api/auth/profile", map[string]string{
+	code, _ := env.put("/api/me/profile", map[string]string{
 		"display_name": "New Name",
 		"email":        "test@example.com",
 	})
 	assertCode(t, "update profile", code, 200)
 
-	_, me := env.get("/api/auth/me")
+	_, me := env.get("/api/me")
 	if me["display_name"] != "New Name" {
 		t.Errorf("display_name = %v", me["display_name"])
 	}
@@ -380,7 +380,7 @@ func TestPasswordChange(t *testing.T) {
 	env.register("pwuser", "oldpass123")
 
 	// Change password
-	code, _ := env.put("/api/auth/password", map[string]string{
+	code, _ := env.put("/api/me/password", map[string]string{
 		"old_password": "oldpass123",
 		"new_password": "newpass123",
 	})
@@ -395,7 +395,7 @@ func TestPasswordChange(t *testing.T) {
 	env.login("pwuser", "newpass123")
 
 	// Wrong old password
-	code, _ = env.put("/api/auth/password", map[string]string{
+	code, _ = env.put("/api/me/password", map[string]string{
 		"old_password": "wrongold",
 		"new_password": "another123",
 	})
@@ -406,7 +406,7 @@ func TestProtectedRoutesRequireAuth(t *testing.T) {
 	env := setup(t)
 	defer env.close()
 
-	paths := []string{"/api/auth/me", "/api/bots", "/api/channels", "/api/stats", "/api/messages?bot_id=x"}
+	paths := []string{"/api/me", "/api/bots", "/api/bots/stats"}
 	for _, p := range paths {
 		code, _ := env.get(p)
 		assertCode(t, "unauth GET "+p, code, 401)
@@ -448,14 +448,14 @@ func TestLinkedAccounts(t *testing.T) {
 	env.register("oauthuser", "password123")
 
 	// List linked accounts (should be empty)
-	code, accounts := env.getList("/api/auth/linked-accounts")
+	code, accounts := env.getList("/api/me/linked-accounts")
 	assertCode(t, "list accounts", code, 200)
 	if accounts != nil && len(accounts) > 0 {
 		t.Errorf("expected 0 linked accounts, got %d", len(accounts))
 	}
 
 	// Unlink non-existent
-	code, _ = env.del("/api/auth/linked-accounts/github")
+	code, _ = env.del("/api/me/linked-accounts/github")
 	assertCode(t, "unlink non-existent", code, 404)
 }
 
@@ -541,8 +541,8 @@ func TestChannelCRUD(t *testing.T) {
 	botObj := env.createBotForUser("Bot1")
 
 	// Create channel
-	code, ch := env.postCode("/api/channels", map[string]string{
-		"bot_id": botObj.ID, "name": "通道1", "handle": "support",
+	code, ch := env.postCode("/api/bots/"+botObj.ID+"/channels", map[string]string{
+		"name": "通道1", "handle": "support",
 	})
 	assertCode(t, "create channel", code, 201)
 	chID := ch["id"].(string)
@@ -554,30 +554,30 @@ func TestChannelCRUD(t *testing.T) {
 	}
 
 	// List channels
-	code, chs := env.getList("/api/channels")
+	code, chs := env.getList("/api/bots/" + botObj.ID + "/channels")
 	assertCode(t, "list channels", code, 200)
 	if len(chs) != 1 {
 		t.Fatalf("want 1 channel, got %d", len(chs))
 	}
 
 	// Update channel
-	code, _ = env.put("/api/channels/"+chID, map[string]any{
+	code, _ = env.put("/api/bots/"+botObj.ID+"/channels/"+chID, map[string]any{
 		"name": "新名称", "handle": "newhandle", "enabled": false,
 	})
 	assertCode(t, "update channel", code, 200)
 
 	// Rotate key
-	code, rotated := env.postCode("/api/channels/"+chID+"/rotate-key", nil)
+	code, rotated := env.postCode("/api/bots/"+botObj.ID+"/channels/"+chID+"/rotate-key", nil)
 	assertCode(t, "rotate key", code, 200)
 	if rotated["api_key"] == nil || rotated["api_key"] == "" {
 		t.Error("rotated key should be returned")
 	}
 
 	// Delete channel
-	code, _ = env.del("/api/channels/" + chID)
+	code, _ = env.del("/api/bots/" + botObj.ID + "/channels/" + chID)
 	assertCode(t, "delete channel", code, 200)
 
-	code, chs = env.getList("/api/channels")
+	code, chs = env.getList("/api/bots/" + botObj.ID + "/channels")
 	if len(chs) != 0 {
 		t.Errorf("channels after delete = %d", len(chs))
 	}
@@ -591,15 +591,11 @@ func TestChannelValidation(t *testing.T) {
 	botObj := env.createBotForUser("Bot1")
 
 	// Missing name
-	code, _ := env.postCode("/api/channels", map[string]string{"bot_id": botObj.ID})
+	code, _ := env.postCode("/api/bots/"+botObj.ID+"/channels", map[string]string{})
 	assertCode(t, "missing name", code, 400)
 
-	// Missing bot_id
-	code, _ = env.postCode("/api/channels", map[string]string{"name": "test"})
-	assertCode(t, "missing bot_id", code, 400)
-
 	// Non-existent bot
-	code, _ = env.postCode("/api/channels", map[string]string{"bot_id": "nonexistent", "name": "test"})
+	code, _ = env.postCode("/api/bots/nonexistent/channels", map[string]string{"name": "test"})
 	assertCode(t, "bad bot_id", code, 404)
 }
 
@@ -615,17 +611,17 @@ func TestChannelOwnershipIsolation(t *testing.T) {
 	env.register("user2", "password123")
 
 	// User2 can't update/delete/rotate user1's channel
-	code, _ := env.put("/api/channels/"+ch.ID, map[string]any{"name": "hacked"})
+	code, _ := env.put("/api/bots/"+botObj.ID+"/channels/"+ch.ID, map[string]any{"name": "hacked"})
 	assertCode(t, "update other's channel", code, 404)
 
-	code, _ = env.del("/api/channels/" + ch.ID)
+	code, _ = env.del("/api/bots/" + botObj.ID + "/channels/" + ch.ID)
 	assertCode(t, "delete other's channel", code, 404)
 
-	code, _ = env.postCode("/api/channels/"+ch.ID+"/rotate-key", nil)
+	code, _ = env.postCode("/api/bots/"+botObj.ID+"/channels/"+ch.ID+"/rotate-key", nil)
 	assertCode(t, "rotate other's key", code, 404)
 
 	// User2 can't create channel on user1's bot
-	code, _ = env.postCode("/api/channels", map[string]string{"bot_id": botObj.ID, "name": "test"})
+	code, _ = env.postCode("/api/bots/"+botObj.ID+"/channels", map[string]string{"name": "test"})
 	assertCode(t, "create on other's bot", code, 404)
 }
 
@@ -639,7 +635,7 @@ func TestMessages(t *testing.T) {
 	botObj := env.createBotForUser("Bot1")
 
 	// No messages yet
-	code, msgs := env.getList(fmt.Sprintf("/api/messages?bot_id=%s", botObj.ID))
+	code, msgs := env.getList(fmt.Sprintf("/api/bots/%s/messages", botObj.ID))
 	assertCode(t, "empty messages", code, 200)
 
 	// Save some messages
@@ -651,15 +647,11 @@ func TestMessages(t *testing.T) {
 		})
 	}
 
-	code, msgs = env.getList(fmt.Sprintf("/api/messages?bot_id=%s", botObj.ID))
+	code, msgs = env.getList(fmt.Sprintf("/api/bots/%s/messages", botObj.ID))
 	assertCode(t, "list messages", code, 200)
 	if len(msgs) != 3 {
 		t.Errorf("want 3 messages, got %d", len(msgs))
 	}
-
-	// Missing bot_id
-	code, _ = env.get("/api/messages")
-	assertCode(t, "missing bot_id", code, 400)
 }
 
 func TestMessageOwnershipIsolation(t *testing.T) {
@@ -672,7 +664,7 @@ func TestMessageOwnershipIsolation(t *testing.T) {
 	env.post("/api/auth/logout", nil)
 	env.register("user2", "password123")
 
-	code, _ := env.get(fmt.Sprintf("/api/messages?bot_id=%s", botObj.ID))
+	code, _ := env.get(fmt.Sprintf("/api/bots/%s/messages", botObj.ID))
 	assertCode(t, "user2 reading user1 messages", code, 404)
 }
 
@@ -686,7 +678,7 @@ func TestStats(t *testing.T) {
 	botObj := env.createBotForUser("Bot1")
 	env.db.CreateChannel(botObj.ID, "Ch1", "", nil, nil)
 
-	code, stats := env.get("/api/stats")
+	code, stats := env.get("/api/bots/stats")
 	assertCode(t, "stats", code, 200)
 	if stats["total_bots"] != float64(1) {
 		t.Errorf("total_bots = %v", stats["total_bots"])
@@ -783,45 +775,45 @@ func TestAdminUserManagement(t *testing.T) {
 	adminID := env.userID()
 
 	// Create user via admin API
-	code, created := env.postCode("/api/users", map[string]string{
+	code, created := env.postCode("/api/admin/users", map[string]string{
 		"username": "newuser", "password": "password123", "role": "member",
 	})
 	assertCode(t, "create user", code, 201)
 	newID := created["id"].(string)
 
 	// List users
-	code, users := env.getList("/api/users")
+	code, users := env.getList("/api/admin/users")
 	assertCode(t, "list users", code, 200)
 	if len(users) != 2 {
 		t.Errorf("want 2 users, got %d", len(users))
 	}
 
 	// Update role
-	code, _ = env.put("/api/users/"+newID+"/role", map[string]string{"role": "admin"})
+	code, _ = env.put("/api/admin/users/"+newID+"/role", map[string]string{"role": "admin"})
 	assertCode(t, "update role", code, 200)
 
 	// Can't demote self
-	code, _ = env.put("/api/users/"+adminID+"/role", map[string]string{"role": "member"})
+	code, _ = env.put("/api/admin/users/"+adminID+"/role", map[string]string{"role": "member"})
 	assertCode(t, "self demote", code, 400)
 
 	// Update status
-	code, _ = env.put("/api/users/"+newID+"/status", map[string]string{"status": "disabled"})
+	code, _ = env.put("/api/admin/users/"+newID+"/status", map[string]string{"status": "disabled"})
 	assertCode(t, "disable user", code, 200)
 
 	// Can't disable self
-	code, _ = env.put("/api/users/"+adminID+"/status", map[string]string{"status": "disabled"})
+	code, _ = env.put("/api/admin/users/"+adminID+"/status", map[string]string{"status": "disabled"})
 	assertCode(t, "self disable", code, 400)
 
 	// Reset password
-	code, _ = env.put("/api/users/"+newID+"/password", map[string]string{"password": "newpass123"})
+	code, _ = env.put("/api/admin/users/"+newID+"/password", map[string]string{"password": "newpass123"})
 	assertCode(t, "reset password", code, 200)
 
 	// Delete user
-	code, _ = env.del("/api/users/" + newID)
+	code, _ = env.del("/api/admin/users/" + newID)
 	assertCode(t, "delete user", code, 200)
 
 	// Can't delete self
-	code, _ = env.del("/api/users/" + adminID)
+	code, _ = env.del("/api/admin/users/" + adminID)
 	assertCode(t, "self delete", code, 400)
 }
 
@@ -834,10 +826,10 @@ func TestAdminRequiresAdminRole(t *testing.T) {
 	env.register("member", "password123")
 
 	// Member can't access admin APIs
-	code, _ := env.getList("/api/users")
+	code, _ := env.getList("/api/admin/users")
 	assertCode(t, "member list users", code, 403)
 
-	code, _ = env.postCode("/api/users", map[string]string{"username": "x", "password": "password123"})
+	code, _ = env.postCode("/api/admin/users", map[string]string{"username": "x", "password": "password123"})
 	assertCode(t, "member create user", code, 403)
 }
 
@@ -948,7 +940,7 @@ func TestWebSocketInvalidKey(t *testing.T) {
 	env := setup(t)
 	defer env.close()
 
-	wsURL := "ws" + env.srv.URL[4:] + "/api/ws?key=invalid"
+	wsURL := "ws" + env.srv.URL[4:] + "/api/v1/connect?key=invalid"
 	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err == nil {
 		t.Error("should fail with invalid key")
@@ -962,7 +954,7 @@ func TestWebSocketNoKey(t *testing.T) {
 	env := setup(t)
 	defer env.close()
 
-	wsURL := "ws" + env.srv.URL[4:] + "/api/ws"
+	wsURL := "ws" + env.srv.URL[4:] + "/api/v1/connect"
 	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err == nil {
 		t.Error("should fail without key")
@@ -1111,7 +1103,7 @@ func TestChannelHTTPStatus(t *testing.T) {
 	env.mgr.StartBot(context.Background(), botObj)
 	ch, _ := env.db.CreateChannel(botObj.ID, "HttpChan", "", nil, nil)
 
-	resp := httpGet(t, env.srv.URL+"/api/channel/status?key="+ch.APIKey)
+	resp := httpGet(t, env.srv.URL+"/api/v1/status?key="+ch.APIKey)
 	defer resp.Body.Close()
 	assertCode(t, "channel status", resp.StatusCode, 200)
 	var status map[string]any
@@ -1124,12 +1116,12 @@ func TestChannelHTTPStatus(t *testing.T) {
 	}
 
 	// No key
-	resp2 := httpGet(t, env.srv.URL+"/api/channel/status")
+	resp2 := httpGet(t, env.srv.URL+"/api/v1/status")
 	assertCode(t, "status no key", resp2.StatusCode, 401)
 	resp2.Body.Close()
 
 	// Invalid key
-	resp3 := httpGet(t, env.srv.URL+"/api/channel/status?key=invalid")
+	resp3 := httpGet(t, env.srv.URL+"/api/v1/status?key=invalid")
 	assertCode(t, "status invalid key", resp3.StatusCode, 401)
 	resp3.Body.Close()
 }
@@ -1143,7 +1135,7 @@ func TestChannelHTTPStatusWithHeader(t *testing.T) {
 	env.mgr.StartBot(context.Background(), botObj)
 	ch, _ := env.db.CreateChannel(botObj.ID, "HeaderChan", "", nil, nil)
 
-	resp := httpGetWithHeader(t, env.srv.URL+"/api/channel/status", "X-API-Key", ch.APIKey)
+	resp := httpGetWithHeader(t, env.srv.URL+"/api/v1/status", "X-API-Key", ch.APIKey)
 	defer resp.Body.Close()
 	assertCode(t, "status via header", resp.StatusCode, 200)
 }
@@ -1165,7 +1157,7 @@ func TestChannelHTTPMessages(t *testing.T) {
 	}
 
 	// First page
-	resp := httpGet(t, env.srv.URL+"/api/channel/messages?key="+ch.APIKey+"&limit=3")
+	resp := httpGet(t, env.srv.URL+"/api/v1/messages?key="+ch.APIKey+"&limit=3")
 	defer resp.Body.Close()
 	assertCode(t, "channel messages", resp.StatusCode, 200)
 	var page1 map[string]any
@@ -1180,7 +1172,7 @@ func TestChannelHTTPMessages(t *testing.T) {
 	}
 
 	// Second page using cursor
-	resp2 := httpGet(t, env.srv.URL+"/api/channel/messages?key="+ch.APIKey+"&cursor="+cursor+"&limit=3")
+	resp2 := httpGet(t, env.srv.URL+"/api/v1/messages?key="+ch.APIKey+"&cursor="+cursor+"&limit=3")
 	defer resp2.Body.Close()
 	var page2 map[string]any
 	json.NewDecoder(resp2.Body).Decode(&page2)
@@ -1194,7 +1186,7 @@ func TestChannelHTTPMessages(t *testing.T) {
 	}
 
 	// Invalid cursor
-	resp3 := httpGet(t, env.srv.URL+"/api/channel/messages?key="+ch.APIKey+"&cursor=bad!")
+	resp3 := httpGet(t, env.srv.URL+"/api/v1/messages?key="+ch.APIKey+"&cursor=bad!")
 	assertCode(t, "invalid cursor", resp3.StatusCode, 400)
 	resp3.Body.Close()
 }
@@ -1209,7 +1201,7 @@ func TestChannelHTTPSend(t *testing.T) {
 	ch, _ := env.db.CreateChannel(botObj.ID, "SendChan", "", nil, nil)
 
 	// Send message
-	resp := httpPost(t, env.srv.URL+"/api/channel/send?key="+ch.APIKey,
+	resp := httpPost(t, env.srv.URL+"/api/v1/send?key="+ch.APIKey,
 		map[string]string{"text": "hello via http"})
 	defer resp.Body.Close()
 	assertCode(t, "channel send", resp.StatusCode, 200)
@@ -1239,19 +1231,19 @@ func TestChannelHTTPSend(t *testing.T) {
 	}
 
 	// Send without text
-	resp2 := httpPost(t, env.srv.URL+"/api/channel/send?key="+ch.APIKey, map[string]string{})
+	resp2 := httpPost(t, env.srv.URL+"/api/v1/send?key="+ch.APIKey, map[string]string{})
 	assertCode(t, "send no text", resp2.StatusCode, 400)
 	resp2.Body.Close()
 
 	// Invalid key
-	resp3 := httpPost(t, env.srv.URL+"/api/channel/send?key=invalid",
+	resp3 := httpPost(t, env.srv.URL+"/api/v1/send?key=invalid",
 		map[string]string{"text": "x"})
 	assertCode(t, "send invalid key", resp3.StatusCode, 401)
 	resp3.Body.Close()
 
 	// Bot disconnected
 	env.mgr.StopBot(botObj.ID)
-	resp4 := httpPost(t, env.srv.URL+"/api/channel/send?key="+ch.APIKey,
+	resp4 := httpPost(t, env.srv.URL+"/api/v1/send?key="+ch.APIKey,
 		map[string]string{"text": "fail"})
 	assertCode(t, "send bot disconnected", resp4.StatusCode, 503)
 	resp4.Body.Close()
@@ -1267,7 +1259,7 @@ func TestChannelHTTPDisabledChannel(t *testing.T) {
 
 	env.db.UpdateChannel(ch.ID, ch.Name, ch.Handle, &ch.FilterRule, &ch.AIConfig, false)
 
-	resp := httpGet(t, env.srv.URL+"/api/channel/status?key="+ch.APIKey)
+	resp := httpGet(t, env.srv.URL+"/api/v1/status?key="+ch.APIKey)
 	assertCode(t, "disabled channel", resp.StatusCode, 401)
 	resp.Body.Close()
 }

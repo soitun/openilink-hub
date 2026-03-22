@@ -170,8 +170,8 @@ func (s *Server) handleDeleteAIConfig(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w)
 }
 
-// GET /api/features — public endpoint to check which features are available
-func (s *Server) handleFeatures(w http.ResponseWriter, r *http.Request) {
+// GET /api/info — public endpoint to check which features are available
+func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	globalAI, _ := s.DB.ListConfigByPrefix("ai.")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{
