@@ -264,7 +264,7 @@ func (m *Manager) resolveAIConfig(cfg database.AIConfig) database.AIConfig {
 	return cfg
 }
 
-const aiReplyTimeout = 60 * time.Second
+const typingTimeout = 30 * time.Second
 
 // aiReply calls the AI completion API and sends the reply through the bot.
 // It also sends typing indicators while the AI is processing.
@@ -275,21 +275,25 @@ func (m *Manager) aiReply(inst *Instance, ch database.Channel, sender, contextTo
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), aiReplyTimeout)
-	defer cancel()
+	ctx := context.Background()
 
-	// Show typing indicator while AI is processing
+	// Show typing indicator with auto-cancel timeout
 	var typingTicket string
 	if contextToken != "" {
 		if cfg, err := inst.Provider.GetConfig(ctx, sender, contextToken); err == nil && cfg.TypingTicket != "" {
 			typingTicket = cfg.TypingTicket
 			inst.Provider.SendTyping(ctx, sender, typingTicket, true)
+			// Auto-cancel typing after timeout in case AI takes too long
+			go func() {
+				time.Sleep(typingTimeout)
+				inst.Provider.SendTyping(context.Background(), sender, typingTicket, false)
+			}()
 		}
 	}
 
 	reply, err := ai.Complete(ctx, resolved, m.db, inst.DBID, sender, text)
 
-	// Cancel typing
+	// Cancel typing (may already be cancelled by timeout goroutine, that's fine)
 	if typingTicket != "" {
 		inst.Provider.SendTyping(ctx, sender, typingTicket, false)
 	}
