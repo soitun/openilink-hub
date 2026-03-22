@@ -251,6 +251,54 @@ func assertCode(t *testing.T, label string, got, want int) {
 	}
 }
 
+// httpGet/httpPost are helpers for plain (no cookie jar) requests that handle errors.
+func httpGet(t *testing.T, url string) *http.Response {
+	t.Helper()
+	resp, err := http.DefaultClient.Do(mustReq(t, "GET", url, nil))
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	return resp
+}
+
+func httpGetWithHeader(t *testing.T, url, header, value string) *http.Response {
+	t.Helper()
+	req := mustReq(t, "GET", url, nil)
+	req.Header.Set(header, value)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	return resp
+}
+
+func httpPost(t *testing.T, url string, body any) *http.Response {
+	t.Helper()
+	data, _ := json.Marshal(body)
+	req := mustReq(t, "POST", url, bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	return resp
+}
+
+func mustReq(t *testing.T, method, url string, body *bytes.Reader) *http.Request {
+	t.Helper()
+	var req *http.Request
+	var err error
+	if body != nil {
+		req, err = http.NewRequest(method, url, body)
+	} else {
+		req, err = http.NewRequest(method, url, nil)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
+}
+
 // ==================== Auth tests ====================
 
 func TestRegisterAndLogin(t *testing.T) {
@@ -1050,4 +1098,163 @@ func TestMentionRouting(t *testing.T) {
 		readWSTimeout(t, wsAll, 300*time.Millisecond) != nil {
 		t.Error("@nobody should not route anywhere")
 	}
+}
+
+// ==================== Channel HTTP API ====================
+
+func TestChannelHTTPStatus(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("httpuser", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+	ch, _ := env.db.CreateChannel(botObj.ID, "HttpChan", "", nil)
+
+	resp := httpGet(t, env.srv.URL+"/api/channel/status?key="+ch.APIKey)
+	defer resp.Body.Close()
+	assertCode(t, "channel status", resp.StatusCode, 200)
+	var status map[string]any
+	json.NewDecoder(resp.Body).Decode(&status)
+	if status["bot_status"] != "connected" {
+		t.Errorf("bot_status = %v", status["bot_status"])
+	}
+	if status["channel_name"] != "HttpChan" {
+		t.Errorf("channel_name = %v", status["channel_name"])
+	}
+
+	// No key
+	resp2 := httpGet(t, env.srv.URL+"/api/channel/status")
+	assertCode(t, "status no key", resp2.StatusCode, 401)
+	resp2.Body.Close()
+
+	// Invalid key
+	resp3 := httpGet(t, env.srv.URL+"/api/channel/status?key=invalid")
+	assertCode(t, "status invalid key", resp3.StatusCode, 401)
+	resp3.Body.Close()
+}
+
+func TestChannelHTTPStatusWithHeader(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("headeruser", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+	ch, _ := env.db.CreateChannel(botObj.ID, "HeaderChan", "", nil)
+
+	resp := httpGetWithHeader(t, env.srv.URL+"/api/channel/status", "X-API-Key", ch.APIKey)
+	defer resp.Body.Close()
+	assertCode(t, "status via header", resp.StatusCode, 200)
+}
+
+func TestChannelHTTPMessages(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("msghttp", "password123")
+	botObj := env.createBotForUser("Bot1")
+	ch, _ := env.db.CreateChannel(botObj.ID, "MsgChan", "", nil)
+
+	payload, _ := json.Marshal(map[string]string{"content": "hello"})
+	for i := 0; i < 5; i++ {
+		env.db.SaveMessage(&database.Message{
+			BotID: botObj.ID, Direction: "inbound", Sender: "u@wx",
+			MsgType: "text", Payload: payload,
+		})
+	}
+
+	resp := httpGet(t, env.srv.URL+"/api/channel/messages?key="+ch.APIKey)
+	defer resp.Body.Close()
+	assertCode(t, "channel messages", resp.StatusCode, 200)
+	var msgs []any
+	json.NewDecoder(resp.Body).Decode(&msgs)
+	if len(msgs) != 5 {
+		t.Errorf("want 5 messages, got %d", len(msgs))
+	}
+
+	// Pagination with after=
+	firstMsg := msgs[0].(map[string]any)
+	afterID := int64(firstMsg["id"].(float64))
+	resp2 := httpGet(t, fmt.Sprintf("%s/api/channel/messages?key=%s&after=%d&limit=2",
+		env.srv.URL, ch.APIKey, afterID))
+	defer resp2.Body.Close()
+	var msgs2 []any
+	json.NewDecoder(resp2.Body).Decode(&msgs2)
+	if len(msgs2) != 2 {
+		t.Errorf("want 2 messages after=%d, got %d", afterID, len(msgs2))
+	}
+}
+
+func TestChannelHTTPSend(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("sendhttp", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+	ch, _ := env.db.CreateChannel(botObj.ID, "SendChan", "", nil)
+
+	// Send message
+	resp := httpPost(t, env.srv.URL+"/api/channel/send?key="+ch.APIKey,
+		map[string]string{"text": "hello via http"})
+	defer resp.Body.Close()
+	assertCode(t, "channel send", resp.StatusCode, 200)
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result["ok"] != true {
+		t.Errorf("ok = %v", result["ok"])
+	}
+
+	// Verify mock provider received
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	sent := inst.Provider.(*mockProvider.Provider).SentMessages()
+	if len(sent) != 1 || sent[0].Text != "hello via http" {
+		t.Errorf("sent = %+v", sent)
+	}
+
+	// Verify message saved in DB with channel_id
+	dbMsgs, _ := env.db.ListMessages(botObj.ID, 10, 0)
+	found := false
+	for _, m := range dbMsgs {
+		if m.Direction == "outbound" && m.ChannelID != nil && *m.ChannelID == ch.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("outbound message not saved with channel_id")
+	}
+
+	// Send without text
+	resp2 := httpPost(t, env.srv.URL+"/api/channel/send?key="+ch.APIKey, map[string]string{})
+	assertCode(t, "send no text", resp2.StatusCode, 400)
+	resp2.Body.Close()
+
+	// Invalid key
+	resp3 := httpPost(t, env.srv.URL+"/api/channel/send?key=invalid",
+		map[string]string{"text": "x"})
+	assertCode(t, "send invalid key", resp3.StatusCode, 401)
+	resp3.Body.Close()
+
+	// Bot disconnected
+	env.mgr.StopBot(botObj.ID)
+	resp4 := httpPost(t, env.srv.URL+"/api/channel/send?key="+ch.APIKey,
+		map[string]string{"text": "fail"})
+	assertCode(t, "send bot disconnected", resp4.StatusCode, 503)
+	resp4.Body.Close()
+}
+
+func TestChannelHTTPDisabledChannel(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("disuser", "password123")
+	botObj := env.createBotForUser("Bot1")
+	ch, _ := env.db.CreateChannel(botObj.ID, "DisChan", "", nil)
+
+	env.db.UpdateChannel(ch.ID, ch.Name, ch.Handle, &ch.FilterRule, false)
+
+	resp := httpGet(t, env.srv.URL+"/api/channel/status?key="+ch.APIKey)
+	assertCode(t, "disabled channel", resp.StatusCode, 401)
+	resp.Body.Close()
 }

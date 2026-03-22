@@ -56,8 +56,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/oauth/{provider}", s.handleOAuthRedirect)
 	mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", s.handleOAuthCallback)
 
-	// --- WebSocket (channel auth via api_key) ---
+	// --- Channel API (api_key auth) ---
 	mux.HandleFunc("GET /api/ws", s.handleWebSocket)
+	mux.HandleFunc("GET /api/channel/messages", s.handleChannelMessages)
+	mux.HandleFunc("POST /api/channel/send", s.handleChannelSend)
+	mux.HandleFunc("GET /api/channel/status", s.handleChannelStatus)
 
 	// --- Protected routes ---
 	protected := http.NewServeMux()

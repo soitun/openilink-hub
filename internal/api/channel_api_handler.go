@@ -1,0 +1,149 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strconv"
+
+	"github.com/openilink/openilink-hub/internal/database"
+	"github.com/openilink/openilink-hub/internal/provider"
+)
+
+// authenticateChannel extracts and validates the channel API key from the request.
+func (s *Server) authenticateChannel(r *http.Request) (*database.Channel, error) {
+	key := r.URL.Query().Get("key")
+	if key == "" {
+		key = r.Header.Get("X-API-Key")
+	}
+	if key == "" {
+		return nil, nil
+	}
+	ch, err := s.DB.GetChannelByAPIKey(key)
+	if err != nil {
+		return nil, err
+	}
+	if !ch.Enabled {
+		return nil, nil
+	}
+	return ch, nil
+}
+
+// GET /api/channel/messages?key=xxx&after=0&limit=50
+func (s *Server) handleChannelMessages(w http.ResponseWriter, r *http.Request) {
+	ch, err := s.authenticateChannel(r)
+	if ch == nil {
+		if err != nil {
+			jsonError(w, "invalid key", http.StatusUnauthorized)
+		} else {
+			jsonError(w, "api key required", http.StatusUnauthorized)
+		}
+		return
+	}
+
+	afterSeq := int64(0)
+	if v := r.URL.Query().Get("after"); v != "" {
+		afterSeq, _ = strconv.ParseInt(v, 10, 64)
+	}
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+
+	msgs, err := s.DB.GetMessagesSince(ch.BotID, afterSeq, limit)
+	if err != nil {
+		jsonError(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Update last_seq
+	if len(msgs) > 0 {
+		s.DB.UpdateChannelLastSeq(ch.ID, msgs[len(msgs)-1].ID)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(msgs)
+}
+
+// POST /api/channel/send?key=xxx
+func (s *Server) handleChannelSend(w http.ResponseWriter, r *http.Request) {
+	ch, err := s.authenticateChannel(r)
+	if ch == nil {
+		if err != nil {
+			jsonError(w, "invalid key", http.StatusUnauthorized)
+		} else {
+			jsonError(w, "api key required", http.StatusUnauthorized)
+		}
+		return
+	}
+
+	var req struct {
+		Text      string `json:"text"`
+		Recipient string `json:"recipient"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Text == "" {
+		jsonError(w, "text required", http.StatusBadRequest)
+		return
+	}
+
+	inst, ok := s.BotManager.GetInstance(ch.BotID)
+	if !ok {
+		jsonError(w, "bot not connected", http.StatusServiceUnavailable)
+		return
+	}
+
+	clientID, err := inst.Send(context.Background(), provider.OutboundMessage{
+		Recipient: req.Recipient,
+		Text:      req.Text,
+	})
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	// Log outbound message
+	chID := ch.ID
+	payload, _ := json.Marshal(map[string]string{"content": req.Text})
+	s.DB.SaveMessage(&database.Message{
+		BotID:     ch.BotID,
+		ChannelID: &chID,
+		Direction: "outbound",
+		Recipient: req.Recipient,
+		MsgType:   "text",
+		Payload:   payload,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"ok":        true,
+		"client_id": clientID,
+	})
+}
+
+// GET /api/channel/status?key=xxx
+func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
+	ch, err := s.authenticateChannel(r)
+	if ch == nil {
+		if err != nil {
+			jsonError(w, "invalid key", http.StatusUnauthorized)
+		} else {
+			jsonError(w, "api key required", http.StatusUnauthorized)
+		}
+		return
+	}
+
+	botStatus := "disconnected"
+	if inst, ok := s.BotManager.GetInstance(ch.BotID); ok {
+		botStatus = inst.Status()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"channel_id":   ch.ID,
+		"channel_name": ch.Name,
+		"bot_id":       ch.BotID,
+		"bot_status":   botStatus,
+	})
+}
