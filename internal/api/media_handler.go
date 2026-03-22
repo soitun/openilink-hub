@@ -51,33 +51,48 @@ func (s *Server) handleChannelMedia(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/media/{key...}
 // Proxy: serves files from MinIO through Hub's own domain.
-// Auth: session cookie (browser) or channel API key (?key=xxx).
+// Key format: media/{bot_id}/{msg_id}/{index}.ext
+//
+// Auth:
+//   - Session cookie: user must own the bot
+//   - Channel API key (?key=xxx): channel must belong to the bot
 func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 	if s.Store == nil {
 		http.Error(w, "storage not configured", http.StatusNotFound)
 		return
 	}
 
-	// Auth: session cookie or channel API key
+	key := strings.TrimPrefix(r.URL.Path, "/api/v1/media/")
+	if key == "" {
+		http.Error(w, "key required", http.StatusBadRequest)
+		return
+	}
+
+	// Extract bot_id from key: media/{bot_id}/...
+	parts := strings.SplitN(key, "/", 3)
+	if len(parts) < 2 || parts[0] != "media" {
+		http.Error(w, "invalid key", http.StatusBadRequest)
+		return
+	}
+	botID := parts[1]
+
+	// Auth: session cookie → check bot ownership
 	authed := false
 	if cookie, err := r.Cookie("session"); err == nil {
 		if uid, err := auth.ValidateSession(s.DB, cookie.Value); err == nil && uid != "" {
-			authed = true
+			if bot, err := s.DB.GetBot(botID); err == nil && bot.UserID == uid {
+				authed = true
+			}
 		}
 	}
+	// Auth: channel API key → check channel belongs to this bot
 	if !authed {
-		if ch, _ := s.authenticateChannel(r); ch != nil {
+		if ch, _ := s.authenticateChannel(r); ch != nil && ch.BotID == botID {
 			authed = true
 		}
 	}
 	if !authed {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	key := strings.TrimPrefix(r.URL.Path, "/api/v1/media/")
-	if key == "" {
-		http.Error(w, "key required", http.StatusBadRequest)
 		return
 	}
 
