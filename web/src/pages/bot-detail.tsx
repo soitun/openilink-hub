@@ -271,6 +271,28 @@ function WsProtocolDocs() {
       </div>
 
       <div>
+        <p className="font-medium text-foreground mt-3 mb-1">HTTP API</p>
+        <p>所有请求通过 <code className="text-primary">?key=API_KEY</code> 或 <code className="text-primary">X-API-Key</code> 头认证。</p>
+        <pre className="bg-card p-2 rounded overflow-x-auto mt-1">{`# 拉取消息（cursor 分页）
+GET /api/v1/channels/messages?key=KEY&cursor=&limit=50
+
+# 发送消息
+POST /api/v1/channels/send?key=KEY
+{"text": "内容"}
+
+# 输入状态
+POST /api/v1/channels/typing?key=KEY
+{"ticket": "xxx", "status": "typing"}
+
+# 获取配置（typing ticket）
+POST /api/v1/channels/config?key=KEY
+{"context_token": "xxx"}
+
+# 渠道状态
+GET /api/v1/channels/status?key=KEY`}</pre>
+      </div>
+
+      <div>
         <p className="font-medium text-foreground mt-3 mb-1">测试命令</p>
         <pre className="bg-card p-2 rounded overflow-x-auto">node example/ws-test.mjs "ws://host:port/api/v1/channels/connect?key=API_KEY"</pre>
       </div>
@@ -281,6 +303,7 @@ function WsProtocolDocs() {
 function ChannelRow({ botId, channel, onRefresh }: { botId: string; channel: any; onRefresh: () => void }) {
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedWs, setCopiedWs] = useState(false);
+  const [copiedHttp, setCopiedHttp] = useState(false);
   const [showLive, setShowLive] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [editingHandle, setEditingHandle] = useState(false);
@@ -288,6 +311,7 @@ function ChannelRow({ botId, channel, onRefresh }: { botId: string; channel: any
 
   const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${wsProto}//${location.host}/api/v1/channels/connect?key=${channel.api_key}`;
+  const httpBase = `${location.origin}/api/v1/channels`;
   const aiEnabled = channel.ai_config?.enabled;
 
   async function saveHandle() {
@@ -305,6 +329,11 @@ function ChannelRow({ botId, channel, onRefresh }: { botId: string; channel: any
     navigator.clipboard.writeText(wsUrl);
     setCopiedWs(true);
     setTimeout(() => setCopiedWs(false), 2000);
+  }
+  function copyHttp() {
+    navigator.clipboard.writeText(httpBase);
+    setCopiedHttp(true);
+    setTimeout(() => setCopiedHttp(false), 2000);
   }
 
   return (
@@ -356,6 +385,7 @@ function ChannelRow({ botId, channel, onRefresh }: { botId: string; channel: any
 
       <CopyRow label="API Key" value={channel.api_key} copied={copiedKey} onCopy={copyKey} />
       <CopyRow label="WebSocket" value={wsUrl} copied={copiedWs} onCopy={copyWs} />
+      <CopyRow label="HTTP API" value={httpBase} copied={copiedHttp} onCopy={copyHttp} />
 
       {showAI && <AIConfigPanel botId={botId} channelId={channel.id} config={channel.ai_config} onSaved={onRefresh} />}
       {showLive && <LivePanel wsUrl={wsUrl} onClose={() => setShowLive(false)} />}
