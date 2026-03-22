@@ -65,7 +65,7 @@ func Complete(ctx context.Context, cfg database.AIConfig, db *database.DB, chann
 	// history is DESC order, reverse it
 	for i := len(history) - 1; i >= 0; i-- {
 		m := history[i]
-		content := extractContent(m.Payload)
+		content := extractTextFromItems(m.ItemList)
 		if content == "" {
 			continue
 		}
@@ -124,10 +124,16 @@ func truncate(s string, max int) string {
 	return s[:max] + "..."
 }
 
-func extractContent(payload json.RawMessage) string {
-	var p struct {
-		Content string `json:"content"`
+func extractTextFromItems(itemList json.RawMessage) string {
+	var items []struct {
+		Type string `json:"type"`
+		Text string `json:"text,omitempty"`
 	}
-	json.Unmarshal(payload, &p)
-	return p.Content
+	json.Unmarshal(itemList, &items)
+	for _, item := range items {
+		if item.Text != "" {
+			return item.Text
+		}
+	}
+	return ""
 }

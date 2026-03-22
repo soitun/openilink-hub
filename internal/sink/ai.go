@@ -76,14 +76,14 @@ func (s *AI) reply(d Delivery) {
 	}
 
 	chID := d.Channel.ID
-	payload, _ := json.Marshal(map[string]string{"content": reply})
+	itemList, _ := json.Marshal([]map[string]any{{"type": "text", "text": reply}})
 	s.DB.SaveMessage(&database.Message{
-		BotID:     d.BotDBID,
-		ChannelID: &chID,
-		Direction: "outbound",
-		Recipient: sender,
-		MsgType:   "text",
-		Payload:   payload,
+		BotID:       d.BotDBID,
+		ChannelID:   &chID,
+		Direction:   "outbound",
+		ToUserID:    sender,
+		MessageType: 2, // BOT
+		ItemList:    itemList,
 	})
 }
 

@@ -55,12 +55,15 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		missed, err := s.DB.GetMessagesSince(ch.BotID, ch.LastSeq, 100)
 		if err == nil && len(missed) > 0 {
 			for _, m := range missed {
-				content := extractContent(m.Payload)
+				ts := m.CreatedAt * 1000
+				if m.CreateTimeMs != nil {
+					ts = *m.CreateTimeMs
+				}
 				env := relay.NewEnvelope("message", relay.MessageData{
 					SeqID:     m.ID,
-					Sender:    m.Sender,
-					Timestamp: m.CreatedAt * 1000,
-					Items:     []relay.MessageItem{{Type: m.MsgType, Text: content}},
+					Sender:    m.FromUserID,
+					Timestamp: ts,
+					Items:     parseRelayItems(m.ItemList),
 				})
 				conn.Send(env)
 			}
@@ -72,12 +75,18 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn.ReadPump() // blocks
 }
 
-func extractContent(payload json.RawMessage) string {
-	var p struct {
-		Content string `json:"content"`
+func parseRelayItems(itemList json.RawMessage) []relay.MessageItem {
+	var items []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text,omitempty"`
+		FileName string `json:"file_name,omitempty"`
 	}
-	json.Unmarshal(payload, &p)
-	return p.Content
+	json.Unmarshal(itemList, &items)
+	result := make([]relay.MessageItem, len(items))
+	for i, item := range items {
+		result[i] = relay.MessageItem{Type: item.Type, Text: item.Text, FileName: item.FileName}
+	}
+	return result
 }
 
 // SetupUpstreamHandler creates the handler for messages from channel clients.
@@ -107,14 +116,14 @@ func (s *Server) SetupUpstreamHandler() relay.UpstreamHandler {
 			}
 
 			channelID := conn.ChannelID
-			payload, _ := json.Marshal(map[string]string{"content": data.Text})
+			itemList, _ := json.Marshal([]map[string]any{{"type": "text", "text": data.Text}})
 			s.DB.SaveMessage(&database.Message{
-				BotID:     conn.BotID,
-				ChannelID: &channelID,
-				Direction: "outbound",
-				Recipient: data.Recipient,
-				MsgType:   "text",
-				Payload:   payload,
+				BotID:       conn.BotID,
+				ChannelID:   &channelID,
+				Direction:   "outbound",
+				ToUserID:    data.Recipient,
+				MessageType: 2,
+				ItemList:    itemList,
 			})
 			conn.Send(relay.NewAck(env.ReqID, true, clientID, ""))
 

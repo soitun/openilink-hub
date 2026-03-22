@@ -132,29 +132,30 @@ func (s *Server) handleChannelSend(w http.ResponseWriter, r *http.Request) {
 	if content == "" && msg.FileName != "" {
 		content = msg.FileName
 	}
-	payloadMap := map[string]any{"content": content}
-
+	itemList, _ := json.Marshal([]map[string]any{{"type": msgType, "text": content}})
+	mediaStatus := ""
+	mediaKeys := json.RawMessage(`{}`)
 	if len(msg.Data) > 0 && s.Store != nil {
 		ct := detectContentType(msgType)
 		ext := detectExt(msg.FileName, msgType)
 		key := fmt.Sprintf("%s/%s/out_%d%s", ch.BotID,
 			time.Now().Format("2006/01/02"), time.Now().UnixMilli(), ext)
 		if _, err := s.Store.Put(r.Context(), key, ct, msg.Data); err == nil {
-			payloadMap["media_key"] = key
-			payloadMap["media_type"] = msgType
-			payloadMap["media_status"] = "ready"
+			mediaStatus = "ready"
+			mediaKeys, _ = json.Marshal(map[string]string{"0": key})
 		}
 	}
 
 	chID := ch.ID
-	payload, _ := json.Marshal(payloadMap)
 	s.DB.SaveMessage(&database.Message{
-		BotID:     ch.BotID,
-		ChannelID: &chID,
-		Direction: "outbound",
-		Recipient: msg.Recipient,
-		MsgType:   msgType,
-		Payload:   payload,
+		BotID:       ch.BotID,
+		ChannelID:   &chID,
+		Direction:   "outbound",
+		ToUserID:    msg.Recipient,
+		MessageType: 2,
+		ItemList:    itemList,
+		MediaStatus: mediaStatus,
+		MediaKeys:   mediaKeys,
 	})
 
 	w.Header().Set("Content-Type", "application/json")

@@ -659,11 +659,11 @@ func TestMessages(t *testing.T) {
 	assertCode(t, "empty messages", code, 200)
 
 	// Save some messages
-	payload, _ := json.Marshal(map[string]string{"content": "hello"})
+	itemList, _ := json.Marshal([]map[string]any{{"type": "text", "text": "hello"}})
 	for i := 0; i < 3; i++ {
 		env.db.SaveMessage(&database.Message{
-			BotID: botObj.ID, Direction: "inbound", Sender: "user@wechat",
-			MsgType: "text", Payload: payload,
+			BotID: botObj.ID, Direction: "inbound", FromUserID: "user@wechat",
+			MessageType: 1, ItemList: itemList,
 		})
 	}
 
@@ -722,11 +722,11 @@ func TestBotContacts(t *testing.T) {
 	botObj := env.createBotForUser("Bot1")
 
 	// Save inbound messages from different senders
-	payload, _ := json.Marshal(map[string]string{"content": "hi"})
+	contactItems, _ := json.Marshal([]map[string]any{{"type": "text", "text": "hi"}})
 	for _, sender := range []string{"alice@wechat", "bob@wechat", "alice@wechat"} {
 		env.db.SaveMessage(&database.Message{
-			BotID: botObj.ID, Direction: "inbound", Sender: sender,
-			MsgType: "text", Payload: payload,
+			BotID: botObj.ID, Direction: "inbound", FromUserID: sender,
+			MessageType: 1, ItemList: contactItems,
 		})
 	}
 
@@ -845,7 +845,7 @@ func TestBotSendMedia(t *testing.T) {
 	msgs, _ := env.db.ListMessages(botObj.ID, 10, 0)
 	found := false
 	for _, m := range msgs {
-		if m.Direction == "outbound" && m.MsgType == "image" {
+		if m.Direction == "outbound" && strings.Contains(string(m.ItemList), `"image"`) {
 			found = true
 		}
 	}
@@ -1219,9 +1219,7 @@ func TestMentionRouting(t *testing.T) {
 	msgs, _ := env.db.ListChannelMessages(chAll.ID, "u@wx", 10)
 	foundNobody := false
 	for _, m := range msgs {
-		var p struct{ Content string }
-		json.Unmarshal(m.Payload, &p)
-		if p.Content == "@nobody test" {
+		if strings.Contains(string(m.ItemList), "@nobody test") {
 			foundNobody = true
 		}
 	}
@@ -1295,7 +1293,7 @@ func TestInboundNoMatchStoredWithoutChannelID(t *testing.T) {
 	msgs, _ := env.db.ListMessages(botObj.ID, 10, 0)
 	found := false
 	for _, m := range msgs {
-		if m.Sender == "other@wx" {
+		if m.FromUserID == "other@wx" {
 			found = true
 			if m.ChannelID != nil {
 				t.Error("unmatched inbound should have nil channel_id")
@@ -1492,15 +1490,15 @@ func TestChannelContextFullIsolation(t *testing.T) {
 	// Add outbound in each channel
 	ch1ID := ch1.ID
 	ch2ID := ch2.ID
-	r1, _ := json.Marshal(map[string]string{"content": "support reply"})
+	r1Items, _ := json.Marshal([]map[string]any{{"type": "text", "text": "support reply"}})
 	env.db.SaveMessage(&database.Message{
 		BotID: botObj.ID, ChannelID: &ch1ID, Direction: "outbound",
-		Recipient: "u@wx", MsgType: "text", Payload: r1,
+		ToUserID: "u@wx", MessageType: 2, ItemList: r1Items,
 	})
-	r2, _ := json.Marshal(map[string]string{"content": "sales reply"})
+	r2Items, _ := json.Marshal([]map[string]any{{"type": "text", "text": "sales reply"}})
 	env.db.SaveMessage(&database.Message{
 		BotID: botObj.ID, ChannelID: &ch2ID, Direction: "outbound",
-		Recipient: "u@wx", MsgType: "text", Payload: r2,
+		ToUserID: "u@wx", MessageType: 2, ItemList: r2Items,
 	})
 
 	// ch1 context: 1 inbound ("@support help me") + 1 outbound ("support reply") = 2
@@ -1509,10 +1507,9 @@ func TestChannelContextFullIsolation(t *testing.T) {
 		t.Errorf("ch1: want 2, got %d", len(msgs1))
 	}
 	for _, m := range msgs1 {
-		var p struct{ Content string }
-		json.Unmarshal(m.Payload, &p)
-		if p.Content == "sales reply" || p.Content == "@sales price?" {
-			t.Errorf("ch1 leaked ch2 content: %q", p.Content)
+		items := string(m.ItemList)
+		if strings.Contains(items, "sales reply") || strings.Contains(items, "@sales price?") {
+			t.Errorf("ch1 leaked ch2 content: %s", items)
 		}
 	}
 
@@ -1522,10 +1519,9 @@ func TestChannelContextFullIsolation(t *testing.T) {
 		t.Errorf("ch2: want 2, got %d", len(msgs2))
 	}
 	for _, m := range msgs2 {
-		var p struct{ Content string }
-		json.Unmarshal(m.Payload, &p)
-		if p.Content == "support reply" || p.Content == "@support help me" {
-			t.Errorf("ch2 leaked ch1 content: %q", p.Content)
+		items := string(m.ItemList)
+		if strings.Contains(items, "support reply") || strings.Contains(items, "@support help me") {
+			t.Errorf("ch2 leaked ch1 content: %s", items)
 		}
 	}
 }
@@ -1586,11 +1582,11 @@ func TestChannelHTTPMessages(t *testing.T) {
 	botObj := env.createBotForUser("Bot1")
 	ch, _ := env.db.CreateChannel(botObj.ID, "MsgChan", "", nil, nil)
 
-	payload, _ := json.Marshal(map[string]string{"content": "hello"})
+	paginationItems, _ := json.Marshal([]map[string]any{{"type": "text", "text": "hello"}})
 	for i := 0; i < 5; i++ {
 		env.db.SaveMessage(&database.Message{
-			BotID: botObj.ID, Direction: "inbound", Sender: "u@wx",
-			MsgType: "text", Payload: payload,
+			BotID: botObj.ID, Direction: "inbound", FromUserID: "u@wx",
+			MessageType: 1, ItemList: paginationItems,
 		})
 	}
 
@@ -1959,9 +1955,7 @@ function onResponse(ctx) {
 	msgs, _ := env.db.ListChannelMessages(ch.ID, "u@wx", 10)
 	replyFound := false
 	for _, m := range msgs {
-		var p struct{ Content string }
-		json.Unmarshal(m.Payload, &p)
-		if p.Content == "42" && m.Direction == "outbound" {
+		if strings.Contains(string(m.ItemList), "42") && m.Direction == "outbound" {
 			replyFound = true
 		}
 	}
@@ -2056,31 +2050,31 @@ func TestAIContextIsolation(t *testing.T) {
 	ch2ID := ch2.ID
 
 	// Simulate inbound routed to ch1
-	p1, _ := json.Marshal(map[string]string{"content": "help me"})
+	items1, _ := json.Marshal([]map[string]any{{"type": "text", "text": "help me"}})
 	env.db.SaveMessage(&database.Message{
 		BotID: botObj.ID, ChannelID: &ch1ID, Direction: "inbound",
-		Sender: sender, MsgType: "text", Payload: p1,
+		FromUserID: sender, MessageType: 1, ItemList: items1,
 	})
 
 	// Simulate inbound routed to ch2
-	p2, _ := json.Marshal(map[string]string{"content": "price?"})
+	items2, _ := json.Marshal([]map[string]any{{"type": "text", "text": "price?"}})
 	env.db.SaveMessage(&database.Message{
 		BotID: botObj.ID, ChannelID: &ch2ID, Direction: "inbound",
-		Sender: sender, MsgType: "text", Payload: p2,
+		FromUserID: sender, MessageType: 1, ItemList: items2,
 	})
 
 	// AI reply in ch1
-	r1, _ := json.Marshal(map[string]string{"content": "support reply"})
+	reply1, _ := json.Marshal([]map[string]any{{"type": "text", "text": "support reply"}})
 	env.db.SaveMessage(&database.Message{
 		BotID: botObj.ID, ChannelID: &ch1ID, Direction: "outbound",
-		Recipient: sender, MsgType: "text", Payload: r1,
+		ToUserID: sender, MessageType: 2, ItemList: reply1,
 	})
 
 	// AI reply in ch2
-	r2, _ := json.Marshal(map[string]string{"content": "sales reply"})
+	reply2, _ := json.Marshal([]map[string]any{{"type": "text", "text": "sales reply"}})
 	env.db.SaveMessage(&database.Message{
 		BotID: botObj.ID, ChannelID: &ch2ID, Direction: "outbound",
-		Recipient: sender, MsgType: "text", Payload: r2,
+		ToUserID: sender, MessageType: 2, ItemList: reply2,
 	})
 
 	// ch1: 1 inbound + 1 outbound = 2
@@ -2092,10 +2086,9 @@ func TestAIContextIsolation(t *testing.T) {
 		t.Errorf("ch1: want 2, got %d", len(msgs1))
 	}
 	for _, m := range msgs1 {
-		var p struct{ Content string }
-		json.Unmarshal(m.Payload, &p)
-		if p.Content == "sales reply" || p.Content == "price?" {
-			t.Errorf("ch1 should NOT contain ch2 content: %q", p.Content)
+		items := string(m.ItemList)
+		if strings.Contains(items, "sales reply") || strings.Contains(items, "price?") {
+			t.Errorf("ch1 should NOT contain ch2 content: %s", items)
 		}
 	}
 
@@ -2108,10 +2101,9 @@ func TestAIContextIsolation(t *testing.T) {
 		t.Errorf("ch2: want 2, got %d", len(msgs2))
 	}
 	for _, m := range msgs2 {
-		var p struct{ Content string }
-		json.Unmarshal(m.Payload, &p)
-		if p.Content == "support reply" || p.Content == "help me" {
-			t.Errorf("ch2 should NOT contain ch1 content: %q", p.Content)
+		items := string(m.ItemList)
+		if strings.Contains(items, "support reply") || strings.Contains(items, "help me") {
+			t.Errorf("ch2 should NOT contain ch1 content: %s", items)
 		}
 	}
 
@@ -2199,25 +2191,23 @@ func TestMediaStorageAndProxy(t *testing.T) {
 	if len(msgs) == 0 {
 		t.Fatal("no messages found")
 	}
-	var earlyPayload map[string]any
-	json.Unmarshal(msgs[0].Payload, &earlyPayload)
-	earlyStatus, _ := earlyPayload["media_status"].(string)
+	earlyStatus := msgs[0].MediaStatus
 	t.Logf("early media_status = %s", earlyStatus)
 
 	// Wait for async download to complete
 	time.Sleep(500 * time.Millisecond)
 	msgs, _ = db.ListChannelMessages(ch.ID, "u@wx", 10)
-	var payload map[string]any
-	json.Unmarshal(msgs[0].Payload, &payload)
 
-	status, _ := payload["media_status"].(string)
+	status := msgs[0].MediaStatus
 	if status != "ready" {
-		t.Fatalf("media_status = %q, want ready. payload: %v", status, payload)
+		t.Fatalf("media_status = %q, want ready", status)
 	}
 
-	mediaKey, ok := payload["media_key"].(string)
-	if !ok || mediaKey == "" {
-		t.Fatalf("media_key not in payload: %v", payload)
+	var mediaKeys map[string]string
+	json.Unmarshal(msgs[0].MediaKeys, &mediaKeys)
+	mediaKey := mediaKeys["0"]
+	if mediaKey == "" {
+		t.Fatalf("media_keys[0] not found: %s", string(msgs[0].MediaKeys))
 	}
 	t.Logf("media_key = %s", mediaKey)
 

@@ -157,18 +157,18 @@ func TestMessageCRUD(t *testing.T) {
 	creds, _ := json.Marshal(map[string]string{"mock": "true"})
 	bot, _ := db.CreateBot(user.ID, "", "mock", creds)
 
-	payload, _ := json.Marshal(map[string]string{"content": "hello"})
+	itemList, _ := json.Marshal([]map[string]any{{"type": "text", "text": "hello"}})
 	for i := 0; i < 5; i++ {
 		db.SaveMessage(&Message{
-			BotID: bot.ID, Direction: "inbound", Sender: "user@im.wechat",
-			MsgType: "text", Payload: payload,
+			BotID: bot.ID, Direction: "inbound", FromUserID: "user@im.wechat",
+			MessageType: 1, ItemList: itemList,
 		})
 	}
 	chID := "ch-123"
-	replyPayload, _ := json.Marshal(map[string]string{"content": "reply"})
+	replyItems, _ := json.Marshal([]map[string]any{{"type": "text", "text": "reply"}})
 	db.SaveMessage(&Message{
-		BotID: bot.ID, Direction: "outbound", Recipient: "user@im.wechat",
-		MsgType: "text", Payload: replyPayload, ChannelID: &chID,
+		BotID: bot.ID, Direction: "outbound", ToUserID: "user@im.wechat",
+		MessageType: 2, ItemList: replyItems, ChannelID: &chID,
 	})
 
 	msgs, err := db.ListMessages(bot.ID, 10, 0)

@@ -261,33 +261,34 @@ func (s *Server) handleBotSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save outbound message (store media to MinIO if available)
+	// Save outbound message
 	content := msg.Text
 	if content == "" && msg.FileName != "" {
 		content = msg.FileName
 	}
-	payloadMap := map[string]any{"content": content}
+	itemList, _ := json.Marshal([]map[string]any{{"type": msgType, "text": content}})
 
+	mediaStatus := ""
+	mediaKeys := json.RawMessage(`{}`)
 	if len(msg.Data) > 0 && s.Store != nil {
 		ct := detectContentType(msgType)
 		ext := detectExt(msg.FileName, msgType)
 		key := fmt.Sprintf("%s/%s/out_%d%s", botID,
 			time.Now().Format("2006/01/02"), time.Now().UnixMilli(), ext)
-		if url, err := s.Store.Put(r.Context(), key, ct, msg.Data); err == nil {
-			payloadMap["media_key"] = key
-			payloadMap["media_type"] = msgType
-			payloadMap["media_status"] = "ready"
-			_ = url
+		if _, err := s.Store.Put(r.Context(), key, ct, msg.Data); err == nil {
+			mediaStatus = "ready"
+			mediaKeys, _ = json.Marshal(map[string]string{"0": key})
 		}
 	}
 
-	payload, _ := json.Marshal(payloadMap)
 	s.DB.SaveMessage(&database.Message{
-		BotID:     botID,
-		Direction: "outbound",
-		Recipient: msg.Recipient,
-		MsgType:   msgType,
-		Payload:   payload,
+		BotID:       botID,
+		Direction:   "outbound",
+		ToUserID:    msg.Recipient,
+		MessageType: 2,
+		ItemList:    itemList,
+		MediaStatus: mediaStatus,
+		MediaKeys:   mediaKeys,
 	})
 
 	w.Header().Set("Content-Type", "application/json")

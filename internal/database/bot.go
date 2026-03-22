@@ -165,9 +165,9 @@ func (db *DB) ListRecentContacts(botID string, limit int) ([]RecentContact, erro
 		limit = 50
 	}
 	rows, err := db.Query(`
-		SELECT sender, EXTRACT(EPOCH FROM MAX(created_at))::BIGINT, COUNT(*)
-		FROM messages WHERE bot_id = $1 AND direction = 'inbound' AND sender != ''
-		GROUP BY sender ORDER BY MAX(created_at) DESC LIMIT $2`,
+		SELECT from_user_id, EXTRACT(EPOCH FROM MAX(created_at))::BIGINT, COUNT(*)
+		FROM messages WHERE bot_id = $1 AND direction = 'inbound' AND from_user_id != ''
+		GROUP BY from_user_id ORDER BY MAX(created_at) DESC LIMIT $2`,
 		botID, limit,
 	)
 	if err != nil {

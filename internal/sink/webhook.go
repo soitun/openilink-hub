@@ -170,14 +170,14 @@ func (s *Webhook) sendReplies(d Delivery, replies []string) {
 			continue
 		}
 		chID := d.Channel.ID
-		payload, _ := json.Marshal(map[string]string{"content": text})
+		itemList, _ := json.Marshal([]map[string]any{{"type": "text", "text": text}})
 		s.DB.SaveMessage(&database.Message{
-			BotID:     d.BotDBID,
-			ChannelID: &chID,
-			Direction: "outbound",
-			Recipient: d.Message.Sender,
-			MsgType:   "text",
-			Payload:   payload,
+			BotID:       d.BotDBID,
+			ChannelID:   &chID,
+			Direction:   "outbound",
+			ToUserID:    d.Message.Sender,
+			MessageType: 2,
+			ItemList:    itemList,
 		})
 	}
 }
