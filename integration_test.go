@@ -1085,6 +1085,205 @@ func TestMentionRouting(t *testing.T) {
 	}
 }
 
+// ==================== Inbound storage with channel_id ====================
+
+func TestInboundStoredWithChannelID(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("storeuser", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+
+	ch, _ := env.db.CreateChannel(botObj.ID, "Default", "", nil, nil)
+	ws := env.connectWS(t, ch.APIKey)
+	defer ws.Close()
+	readWS(t, ws) // init
+
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	mock := inst.Provider.(*mockProvider.Provider)
+
+	// Send inbound message (no @mention, matches first channel)
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "100", Sender: "alice@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "hello"}},
+	})
+	readWSTimeout(t, ws, 2*time.Second)
+
+	// Verify inbound stored with channel_id
+	msgs, _ := env.db.ListChannelMessages(ch.ID, "alice@wx", 10)
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 message in channel, got %d", len(msgs))
+	}
+	if msgs[0].Direction != "inbound" {
+		t.Errorf("direction = %q, want inbound", msgs[0].Direction)
+	}
+	if msgs[0].ChannelID == nil || *msgs[0].ChannelID != ch.ID {
+		t.Errorf("channel_id = %v, want %s", msgs[0].ChannelID, ch.ID)
+	}
+}
+
+func TestInboundNoMatchStoredWithoutChannelID(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("nomatch", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+
+	// Channel with user filter that won't match
+	filter := &database.FilterRule{UserIDs: []string{"specific@wx"}}
+	env.db.CreateChannel(botObj.ID, "Filtered", "", filter, nil)
+
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	mock := inst.Provider.(*mockProvider.Provider)
+
+	// Send from non-matching user
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "200", Sender: "other@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "hello"}},
+	})
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Should be stored without channel_id
+	msgs, _ := env.db.ListMessages(botObj.ID, 10, 0)
+	found := false
+	for _, m := range msgs {
+		if m.Sender == "other@wx" {
+			found = true
+			if m.ChannelID != nil {
+				t.Error("unmatched inbound should have nil channel_id")
+			}
+		}
+	}
+	if !found {
+		t.Error("unmatched inbound should still be stored")
+	}
+}
+
+func TestMentionRoutesFirstOnly(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("firstonly", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+
+	// Two channels, second one also has handle "support"
+	ch1, _ := env.db.CreateChannel(botObj.ID, "Support1", "support", nil, nil)
+	ch2, _ := env.db.CreateChannel(botObj.ID, "Support2", "support", nil, nil)
+
+	ws1 := env.connectWS(t, ch1.APIKey)
+	defer ws1.Close()
+	ws2 := env.connectWS(t, ch2.APIKey)
+	defer ws2.Close()
+	readWS(t, ws1)
+	readWS(t, ws2)
+
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	mock := inst.Provider.(*mockProvider.Provider)
+
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "300", Sender: "u@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "@support help"}},
+	})
+
+	// Only first channel receives
+	if readWSTimeout(t, ws1, 2*time.Second) == nil {
+		t.Error("ch1 (first match) should receive")
+	}
+	if readWSTimeout(t, ws2, 300*time.Millisecond) != nil {
+		t.Error("ch2 (second match) should NOT receive")
+	}
+
+	// Stored with ch1's channel_id
+	msgs, _ := env.db.ListChannelMessages(ch1.ID, "u@wx", 10)
+	if len(msgs) != 1 {
+		t.Errorf("ch1 should have 1 message, got %d", len(msgs))
+	}
+	msgs2, _ := env.db.ListChannelMessages(ch2.ID, "u@wx", 10)
+	if len(msgs2) != 0 {
+		t.Errorf("ch2 should have 0 messages, got %d", len(msgs2))
+	}
+}
+
+func TestChannelContextFullIsolation(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("isol", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+
+	ch1, _ := env.db.CreateChannel(botObj.ID, "Support", "support", nil, nil)
+	ch2, _ := env.db.CreateChannel(botObj.ID, "Sales", "sales", nil, nil)
+
+	ws1 := env.connectWS(t, ch1.APIKey)
+	defer ws1.Close()
+	ws2 := env.connectWS(t, ch2.APIKey)
+	defer ws2.Close()
+	readWS(t, ws1)
+	readWS(t, ws2)
+
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	mock := inst.Provider.(*mockProvider.Provider)
+
+	// @support → ch1
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "400", Sender: "u@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "@support help me"}},
+	})
+	readWSTimeout(t, ws1, 2*time.Second)
+
+	// @sales → ch2
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "401", Sender: "u@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "@sales price?"}},
+	})
+	readWSTimeout(t, ws2, 2*time.Second)
+
+	// Add outbound in each channel
+	ch1ID := ch1.ID
+	ch2ID := ch2.ID
+	r1, _ := json.Marshal(map[string]string{"content": "support reply"})
+	env.db.SaveMessage(&database.Message{
+		BotID: botObj.ID, ChannelID: &ch1ID, Direction: "outbound",
+		Recipient: "u@wx", MsgType: "text", Payload: r1,
+	})
+	r2, _ := json.Marshal(map[string]string{"content": "sales reply"})
+	env.db.SaveMessage(&database.Message{
+		BotID: botObj.ID, ChannelID: &ch2ID, Direction: "outbound",
+		Recipient: "u@wx", MsgType: "text", Payload: r2,
+	})
+
+	// ch1 context: 1 inbound ("@support help me") + 1 outbound ("support reply") = 2
+	msgs1, _ := env.db.ListChannelMessages(ch1.ID, "u@wx", 50)
+	if len(msgs1) != 2 {
+		t.Errorf("ch1: want 2, got %d", len(msgs1))
+	}
+	for _, m := range msgs1 {
+		var p struct{ Content string }
+		json.Unmarshal(m.Payload, &p)
+		if p.Content == "sales reply" || p.Content == "@sales price?" {
+			t.Errorf("ch1 leaked ch2 content: %q", p.Content)
+		}
+	}
+
+	// ch2 context: 1 inbound ("@sales price?") + 1 outbound ("sales reply") = 2
+	msgs2, _ := env.db.ListChannelMessages(ch2.ID, "u@wx", 50)
+	if len(msgs2) != 2 {
+		t.Errorf("ch2: want 2, got %d", len(msgs2))
+	}
+	for _, m := range msgs2 {
+		var p struct{ Content string }
+		json.Unmarshal(m.Payload, &p)
+		if p.Content == "support reply" || p.Content == "@support help me" {
+			t.Errorf("ch2 leaked ch1 content: %q", p.Content)
+		}
+	}
+}
+
 // ==================== Channel HTTP API ====================
 
 func TestChannelHTTPStatus(t *testing.T) {
