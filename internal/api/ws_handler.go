@@ -106,9 +106,11 @@ func (s *Server) SetupUpstreamHandler() relay.UpstreamHandler {
 				return
 			}
 
+			ctxToken := s.DB.GetLatestContextToken(conn.BotID)
 			clientID, err := inst.Send(context.Background(), provider.OutboundMessage{
-				Recipient: data.Recipient,
-				Text:      data.Text,
+				Recipient:    data.Recipient,
+				Text:         data.Text,
+				ContextToken: ctxToken,
 			})
 			if err != nil {
 				conn.Send(relay.NewAck(env.ReqID, false, "", err.Error()))

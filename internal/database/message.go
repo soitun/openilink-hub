@@ -132,6 +132,16 @@ func (db *DB) GetMessagesSince(botID string, afterSeq int64, limit int) ([]Messa
 	)
 }
 
+// GetLatestContextToken returns the most recent non-empty context_token for a bot.
+func (db *DB) GetLatestContextToken(botID string) string {
+	var token string
+	db.QueryRow(
+		"SELECT context_token FROM messages WHERE bot_id = $1 AND context_token != '' ORDER BY id DESC LIMIT 1",
+		botID,
+	).Scan(&token)
+	return token
+}
+
 // UpdateMediaStatus updates media_status and media_keys for all downloading messages of a bot.
 func (db *DB) UpdateMediaStatus(botID, status string, keys json.RawMessage) error {
 	if keys == nil {

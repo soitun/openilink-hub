@@ -127,6 +127,11 @@ func (s *Server) handleChannelSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-fill context_token from latest message if not provided
+	if msg.ContextToken == "" {
+		msg.ContextToken = s.DB.GetLatestContextToken(ch.BotID)
+	}
+
 	clientID, err := inst.Send(context.Background(), msg)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
