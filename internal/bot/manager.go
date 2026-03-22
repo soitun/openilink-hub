@@ -335,6 +335,19 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 
 // downloadAndUpdateMedia downloads media files and updates all saved message payloads.
 func (m *Manager) downloadAndUpdateMedia(inst *Instance, msg provider.InboundMessage, payloadMap map[string]any, msgIDs []int64) {
+	// Always update status, even on panic
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("media download panic", "err", r, "bot", inst.DBID)
+			payloadMap["media_status"] = "failed"
+			updated, _ := json.Marshal(payloadMap)
+			for _, id := range msgIDs {
+				m.db.UpdateMessagePayload(id, updated)
+			}
+		}
+	}()
+
+	slog.Info("media download start", "bot", inst.DBID, "msg", msg.ExternalID)
 	m.processMedia(inst, &msg)
 
 	ok := false
@@ -343,14 +356,12 @@ func (m *Manager) downloadAndUpdateMedia(inst *Instance, msg provider.InboundMes
 			continue
 		}
 		if item.Media.StorageKey != "" {
-			// MinIO stored
 			payloadMap["media_key"] = item.Media.StorageKey
 			payloadMap["media_status"] = "ready"
 			ok = true
 			break
 		}
 		if item.Media.URL != "" {
-			// CDN proxy fallback (no MinIO)
 			payloadMap["media_url"] = item.Media.URL
 			payloadMap["media_status"] = "ready"
 			ok = true
@@ -358,12 +369,17 @@ func (m *Manager) downloadAndUpdateMedia(inst *Instance, msg provider.InboundMes
 		}
 	}
 	if !ok {
+		slog.Error("media download failed: no key or url after processing", "bot", inst.DBID, "msg", msg.ExternalID)
 		payloadMap["media_status"] = "failed"
+	} else {
+		slog.Info("media download done", "bot", inst.DBID, "msg", msg.ExternalID, "status", payloadMap["media_status"])
 	}
 
 	updated, _ := json.Marshal(payloadMap)
 	for _, id := range msgIDs {
-		m.db.UpdateMessagePayload(id, updated)
+		if err := m.db.UpdateMessagePayload(id, updated); err != nil {
+			slog.Error("media payload update failed", "msgID", id, "err", err)
+		}
 	}
 }
 
@@ -372,7 +388,8 @@ func (m *Manager) downloadAndUpdateMedia(inst *Instance, msg provider.InboundMes
 // - With MinIO: download → store → set URL to MinIO
 // - Without MinIO: set URL to Hub proxy endpoint
 func (m *Manager) processMedia(inst *Instance, msg *provider.InboundMessage) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 	for i := range msg.Items {
 		item := &msg.Items[i]
 		if item.Media == nil || item.Media.EncryptQueryParam == "" {
