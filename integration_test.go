@@ -1285,18 +1285,10 @@ func TestAIContextIsolation(t *testing.T) {
 	ch2ID := ch2.ID
 	payload, _ := json.Marshal(map[string]string{"content": "hello"})
 
-	// Inbound messages routed to ch1
+	// Inbound messages (no channel_id, shared across channels)
 	for i := 0; i < 3; i++ {
 		env.db.SaveMessage(&database.Message{
-			BotID: botObj.ID, ChannelID: &ch1ID, Direction: "inbound", Sender: sender,
-			MsgType: "text", Payload: payload,
-		})
-	}
-
-	// Inbound messages routed to ch2
-	for i := 0; i < 2; i++ {
-		env.db.SaveMessage(&database.Message{
-			BotID: botObj.ID, ChannelID: &ch2ID, Direction: "inbound", Sender: sender,
+			BotID: botObj.ID, Direction: "inbound", Sender: sender,
 			MsgType: "text", Payload: payload,
 		})
 	}
@@ -1315,8 +1307,8 @@ func TestAIContextIsolation(t *testing.T) {
 		Recipient: sender, MsgType: "text", Payload: reply2,
 	})
 
-	// ch1 context: 3 inbound + 1 outbound = 4
-	msgs1, err := env.db.ListChannelMessages(ch1.ID, sender, 50)
+	// ch1 context: 3 shared inbound + 1 ch1 outbound = 4
+	msgs1, err := env.db.ListChannelMessages(botObj.ID, ch1.ID, sender, 50)
 	if err != nil {
 		t.Fatalf("ListChannelMessages ch1: %v", err)
 	}
@@ -1331,13 +1323,13 @@ func TestAIContextIsolation(t *testing.T) {
 		}
 	}
 
-	// ch2 context: 2 inbound + 1 outbound = 3
-	msgs2, err := env.db.ListChannelMessages(ch2.ID, sender, 50)
+	// ch2 context: 3 shared inbound + 1 ch2 outbound = 4
+	msgs2, err := env.db.ListChannelMessages(botObj.ID, ch2.ID, sender, 50)
 	if err != nil {
 		t.Fatalf("ListChannelMessages ch2: %v", err)
 	}
-	if len(msgs2) != 3 {
-		t.Errorf("ch2 context: want 3, got %d", len(msgs2))
+	if len(msgs2) != 4 {
+		t.Errorf("ch2 context: want 4, got %d", len(msgs2))
 	}
 	for _, m := range msgs2 {
 		var p struct{ Content string }
@@ -1348,7 +1340,7 @@ func TestAIContextIsolation(t *testing.T) {
 	}
 
 	// Different sender sees nothing
-	msgs3, _ := env.db.ListChannelMessages(ch1.ID, "other@wechat", 50)
+	msgs3, _ := env.db.ListChannelMessages(botObj.ID, ch1.ID, "other@wechat", 50)
 	if len(msgs3) != 0 {
 		t.Errorf("other sender: want 0, got %d", len(msgs3))
 	}

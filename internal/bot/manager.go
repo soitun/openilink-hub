@@ -167,6 +167,14 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 	}
 	payload, _ := json.Marshal(payloadMap)
 
+	seqID, _ := m.db.SaveMessage(&database.Message{
+		BotID:     inst.DBID,
+		Direction: "inbound",
+		Sender:    msg.Sender,
+		Recipient: msg.Recipient,
+		MsgType:   msgType,
+		Payload:   payload,
+	})
 	_ = m.db.IncrBotMsgCount(inst.DBID)
 
 	// Build relay items (shared across channels)
@@ -203,40 +211,29 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 		}
 	}
 
-	// Deliver to all sinks — save per-channel inbound message
-	for _, ch := range matched {
-		chID := ch.ID
-		seqID, _ := m.db.SaveMessage(&database.Message{
-			BotID:     inst.DBID,
-			ChannelID: &chID,
-			Direction: "inbound",
-			Sender:    msg.Sender,
-			Recipient: msg.Recipient,
-			MsgType:   msgType,
-			Payload:   payload,
-		})
-		_ = m.db.UpdateChannelLastSeq(ch.ID, seqID)
+	env := relay.NewEnvelope("message", relay.MessageData{
+		SeqID:        seqID,
+		ExternalID:   msg.ExternalID,
+		Sender:       msg.Sender,
+		Recipient:    msg.Recipient,
+		GroupID:      msg.GroupID,
+		Timestamp:    msg.Timestamp,
+		MessageState: msg.MessageState,
+		Items:        items,
+		ContextToken: msg.ContextToken,
+		SessionID:    msg.SessionID,
+	})
 
-		// Update envelope with this channel's seq_id
-		chEnv := relay.NewEnvelope("message", relay.MessageData{
-			SeqID:        seqID,
-			ExternalID:   msg.ExternalID,
-			Sender:       msg.Sender,
-			Recipient:    msg.Recipient,
-			GroupID:      msg.GroupID,
-			Timestamp:    msg.Timestamp,
-			MessageState: msg.MessageState,
-			Items:        items,
-			ContextToken: msg.ContextToken,
-			SessionID:    msg.SessionID,
-		})
+	// Deliver to all sinks
+	for _, ch := range matched {
+		_ = m.db.UpdateChannelLastSeq(ch.ID, seqID)
 
 		d := sink.Delivery{
 			BotDBID:  inst.DBID,
 			Provider: inst.Provider,
 			Channel:  ch,
 			Message:  msg,
-			Envelope: chEnv,
+			Envelope: env,
 			SeqID:    seqID,
 			MsgType:  msgType,
 			Content:  content,

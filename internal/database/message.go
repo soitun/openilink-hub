@@ -96,8 +96,9 @@ func (db *DB) ListMessagesBySender(botID, sender string, limit int) ([]Message, 
 	return msgs, rows.Err()
 }
 
-// ListChannelMessages returns conversation history scoped to a channel and sender.
-func (db *DB) ListChannelMessages(channelID, sender string, limit int) ([]Message, error) {
+// ListChannelMessages returns conversation history scoped to a channel.
+// Inbound messages are shared (no channel_id), outbound are channel-specific.
+func (db *DB) ListChannelMessages(botID, channelID, sender string, limit int) ([]Message, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -105,9 +106,12 @@ func (db *DB) ListChannelMessages(channelID, sender string, limit int) ([]Messag
 		SELECT id, bot_id, channel_id, direction, sender, recipient, msg_type, payload,
 		       EXTRACT(EPOCH FROM created_at)::BIGINT
 		FROM messages
-		WHERE channel_id = $1 AND (sender = $2 OR recipient = $2)
-		ORDER BY id DESC LIMIT $3`,
-		channelID, sender, limit,
+		WHERE bot_id = $1 AND (
+			(direction = 'inbound' AND sender = $3)
+			OR (direction = 'outbound' AND channel_id = $2 AND recipient = $3)
+		)
+		ORDER BY id DESC LIMIT $4`,
+		botID, channelID, sender, limit,
 	)
 	if err != nil {
 		return nil, err
