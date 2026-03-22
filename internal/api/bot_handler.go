@@ -277,6 +277,27 @@ func (s *Server) handleBotSend(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{"ok": true, "client_id": clientID})
 }
 
+func detectMediaType(filename, mime string) string {
+	lower := strings.ToLower(filename)
+	switch {
+	case strings.HasPrefix(mime, "image/"),
+		strings.HasSuffix(lower, ".jpg"), strings.HasSuffix(lower, ".jpeg"),
+		strings.HasSuffix(lower, ".png"), strings.HasSuffix(lower, ".gif"),
+		strings.HasSuffix(lower, ".webp"):
+		return "image"
+	case strings.HasPrefix(mime, "video/"),
+		strings.HasSuffix(lower, ".mp4"), strings.HasSuffix(lower, ".mov"),
+		strings.HasSuffix(lower, ".avi"):
+		return "video"
+	case strings.HasPrefix(mime, "audio/"),
+		strings.HasSuffix(lower, ".mp3"), strings.HasSuffix(lower, ".wav"),
+		strings.HasSuffix(lower, ".ogg"):
+		return "voice"
+	default:
+		return "file"
+	}
+}
+
 func parseSendRequest(r *http.Request) (provider.OutboundMessage, string, error) {
 	ct := r.Header.Get("Content-Type")
 
@@ -292,15 +313,7 @@ func parseSendRequest(r *http.Request) (provider.OutboundMessage, string, error)
 		defer file.Close()
 		data, _ := io.ReadAll(file)
 
-		msgType := "file"
-		mime := header.Header.Get("Content-Type")
-		if strings.HasPrefix(mime, "image/") {
-			msgType = "image"
-		} else if strings.HasPrefix(mime, "video/") {
-			msgType = "video"
-		} else if strings.HasPrefix(mime, "audio/") {
-			msgType = "voice"
-		}
+		msgType := detectMediaType(header.Filename, header.Header.Get("Content-Type"))
 
 		return provider.OutboundMessage{
 			Recipient: r.FormValue("recipient"),

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -288,6 +289,17 @@ func httpPost(t *testing.T, url string, body any) *http.Response {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
+	}
+	return resp
+}
+
+func httpPostMultipart(t *testing.T, url, contentType string, body []byte) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
+	req.Header.Set("Content-Type", contentType)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST multipart %s: %v", url, err)
 	}
 	return resp
 }
@@ -771,6 +783,108 @@ func TestBotSend(t *testing.T) {
 	env.mgr.StopBot(botObj.ID)
 	code, _ = env.postCode("/api/bots/"+botObj.ID+"/send", map[string]string{"text": "fail"})
 	assertCode(t, "send disconnected", code, 503)
+}
+
+func TestBotSendMedia(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("mediasend", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+
+	// Send image via multipart
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("file", "test.jpg")
+	part.Write([]byte("fake-jpeg-data"))
+	writer.WriteField("text", "看看这张图")
+	writer.Close()
+
+	req, _ := http.NewRequest("POST", env.srv.URL+"/api/bots/"+botObj.ID+"/send", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	// Copy cookies for auth
+	for _, c := range env.client.Jar.Cookies(req.URL) {
+		req.AddCookie(c)
+	}
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("send media: %v", err)
+	}
+	defer resp.Body.Close()
+	assertCode(t, "send media", resp.StatusCode, 200)
+
+	// Verify mock provider received media
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	sent := inst.Provider.(*mockProvider.Provider).SentMessages()
+	var mediaSent *provider.OutboundMessage
+	for i := range sent {
+		if sent[i].FileName != "" {
+			mediaSent = &sent[i]
+			break
+		}
+	}
+	if mediaSent == nil {
+		t.Fatal("no media message sent to provider")
+	}
+	if mediaSent.FileName != "test.jpg" {
+		t.Errorf("filename = %q, want test.jpg", mediaSent.FileName)
+	}
+	if string(mediaSent.Data) != "fake-jpeg-data" {
+		t.Errorf("data = %q", string(mediaSent.Data))
+	}
+	if mediaSent.Text != "看看这张图" {
+		t.Errorf("text = %q, want caption", mediaSent.Text)
+	}
+
+	// Verify message saved in DB
+	msgs, _ := env.db.ListMessages(botObj.ID, 10, 0)
+	found := false
+	for _, m := range msgs {
+		if m.Direction == "outbound" && m.MsgType == "image" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("outbound image message not saved in DB")
+	}
+}
+
+func TestChannelSendMedia(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("chsend", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+	ch, _ := env.db.CreateChannel(botObj.ID, "SendChan", "", nil, nil)
+
+	// Send file via channel API (multipart with API key)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("file", "document.pdf")
+	part.Write([]byte("fake-pdf-data"))
+	writer.Close()
+
+	resp := httpPostMultipart(t, env.srv.URL+"/api/v1/channels/send?key="+ch.APIKey, writer.FormDataContentType(), body.Bytes())
+	defer resp.Body.Close()
+	assertCode(t, "channel send media", resp.StatusCode, 200)
+
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	sent := inst.Provider.(*mockProvider.Provider).SentMessages()
+	var fileSent *provider.OutboundMessage
+	for i := range sent {
+		if sent[i].FileName != "" {
+			fileSent = &sent[i]
+			break
+		}
+	}
+	if fileSent == nil {
+		t.Fatal("no file message sent via channel")
+	}
+	if fileSent.FileName != "document.pdf" {
+		t.Errorf("filename = %q", fileSent.FileName)
+	}
 }
 
 // ==================== Admin user management ====================
