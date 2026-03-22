@@ -23,6 +23,8 @@ import (
 	"github.com/openilink/openilink-hub/internal/relay"
 )
 
+// ==================== Test infrastructure ====================
+
 func testDB(t *testing.T) *database.DB {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -31,9 +33,8 @@ func testDB(t *testing.T) *database.DB {
 	}
 	db, err := database.Open(dsn)
 	if err != nil {
-		t.Skipf("skip integration test: database unavailable: %v", err)
+		t.Skipf("skip: database unavailable: %v", err)
 	}
-	// Clean tables for a fresh test
 	for _, table := range []string{"messages", "channels", "bots", "oauth_accounts", "sessions", "credentials", "users", "system_config"} {
 		db.Exec("DELETE FROM " + table)
 	}
@@ -47,6 +48,7 @@ type testEnv struct {
 	client *http.Client
 	mgr    *bot.Manager
 	hub    *relay.Hub
+	cfg    *config.Config
 }
 
 func setup(t *testing.T) *testEnv {
@@ -73,11 +75,13 @@ func setup(t *testing.T) *testEnv {
 	server.Hub = hub
 
 	ts := httptest.NewServer(server.Handler())
-
 	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Jar: jar}
 
-	return &testEnv{t: t, db: db, srv: ts, client: client, mgr: mgr, hub: hub}
+	return &testEnv{
+		t: t, db: db, srv: ts, cfg: cfg,
+		client: &http.Client{Jar: jar},
+		mgr: mgr, hub: hub,
+	}
 }
 
 func (e *testEnv) close() {
@@ -86,18 +90,36 @@ func (e *testEnv) close() {
 	e.db.Close()
 }
 
-// --- HTTP helpers ---
+// newClient returns a fresh HTTP client (separate cookie jar = separate session).
+func (e *testEnv) newClient() *http.Client {
+	jar, _ := cookiejar.New(nil)
+	return &http.Client{Jar: jar}
+}
 
-func (e *testEnv) post(path string, body any) map[string]any {
+// ==================== HTTP helpers ====================
+
+func (e *testEnv) postRaw(path string, body any) *http.Response {
 	e.t.Helper()
 	data, _ := json.Marshal(body)
 	resp, err := e.client.Post(e.srv.URL+path, "application/json", bytes.NewReader(data))
 	if err != nil {
 		e.t.Fatalf("POST %s: %v", path, err)
 	}
+	return resp
+}
+
+func (e *testEnv) postCode(path string, body any) (int, map[string]any) {
+	e.t.Helper()
+	resp := e.postRaw(path, body)
 	defer resp.Body.Close()
 	var result map[string]any
 	json.NewDecoder(resp.Body).Decode(&result)
+	return resp.StatusCode, result
+}
+
+func (e *testEnv) post(path string, body any) map[string]any {
+	e.t.Helper()
+	_, result := e.postCode(path, body)
 	return result
 }
 
@@ -125,15 +147,17 @@ func (e *testEnv) getList(path string) (int, []any) {
 	return resp.StatusCode, result
 }
 
-func (e *testEnv) del(path string) int {
+func (e *testEnv) del(path string) (int, map[string]any) {
 	e.t.Helper()
 	req, _ := http.NewRequest("DELETE", e.srv.URL+path, nil)
 	resp, err := e.client.Do(req)
 	if err != nil {
 		e.t.Fatalf("DELETE %s: %v", path, err)
 	}
-	resp.Body.Close()
-	return resp.StatusCode
+	defer resp.Body.Close()
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+	return resp.StatusCode, result
 }
 
 func (e *testEnv) put(path string, body any) (int, map[string]any) {
@@ -153,343 +177,38 @@ func (e *testEnv) put(path string, body any) (int, map[string]any) {
 
 func (e *testEnv) register(username, password string) {
 	e.t.Helper()
-	result := e.post("/api/auth/register", map[string]string{
-		"username": username,
-		"password": password,
-	})
-	if _, ok := result["error"]; ok {
-		e.t.Fatalf("register failed: %v", result["error"])
-	}
-}
-
-// --- Tests ---
-
-func TestAuthFlow(t *testing.T) {
-	env := setup(t)
-	defer env.close()
-
-	// Register first user (becomes admin)
-	env.register("admin", "password123")
-
-	// Check /me
-	code, me := env.get("/api/auth/me")
+	code, result := e.postCode("/api/auth/register", map[string]string{"username": username, "password": password})
 	if code != 200 {
-		t.Fatalf("GET /me: got %d", code)
-	}
-	if me["username"] != "admin" {
-		t.Errorf("username = %v, want admin", me["username"])
-	}
-	if me["role"] != "admin" {
-		t.Errorf("role = %v, want admin", me["role"])
-	}
-
-	// Logout
-	env.post("/api/auth/logout", nil)
-
-	// Should be unauthorized now
-	code, _ = env.get("/api/auth/me")
-	if code != 401 {
-		t.Errorf("after logout: got %d, want 401", code)
-	}
-
-	// Login back
-	result := env.post("/api/auth/login", map[string]string{
-		"username": "admin",
-		"password": "password123",
-	})
-	if _, ok := result["error"]; ok {
-		t.Fatalf("login failed: %v", result["error"])
-	}
-
-	// Register second user (becomes member)
-	env2 := setup(t) // fresh client
-	defer env2.close()
-	// Reuse same DB - don't clean
-	env2.db = env.db
-
-	jar2, _ := cookiejar.New(nil)
-	env2.client = &http.Client{Jar: jar2}
-	env2.srv = env.srv
-
-	result = env2.post("/api/auth/register", map[string]string{
-		"username": "member1",
-		"password": "password123",
-	})
-	if _, ok := result["error"]; ok {
-		t.Fatalf("register member failed: %v", result["error"])
+		e.t.Fatalf("register %s failed: %d %v", username, code, result["error"])
 	}
 }
 
-func TestBotAndChannelCRUD(t *testing.T) {
-	env := setup(t)
-	defer env.close()
+func (e *testEnv) login(username, password string) {
+	e.t.Helper()
+	code, result := e.postCode("/api/auth/login", map[string]string{"username": username, "password": password})
+	if code != 200 {
+		e.t.Fatalf("login %s failed: %d %v", username, code, result["error"])
+	}
+}
 
-	env.register("testuser", "password123")
+func (e *testEnv) userID() string {
+	e.t.Helper()
+	_, me := e.get("/api/auth/me")
+	return me["id"].(string)
+}
 
-	// Create bot directly in DB (since bind flow requires iLink)
-	botObj, err := env.db.CreateBot("", "TestBot", "mock", mockProvider.Credentials())
+// createBotForUser creates a mock bot owned by the current user.
+func (e *testEnv) createBotForUser(name string) *database.Bot {
+	e.t.Helper()
+	uid := e.userID()
+	b, err := e.db.CreateBot(uid, name, "mock", mockProvider.Credentials())
 	if err != nil {
-		t.Fatalf("create bot: %v", err)
+		e.t.Fatalf("createBot: %v", err)
 	}
-	// Set user_id
-	env.db.Exec("UPDATE bots SET user_id = (SELECT id FROM users LIMIT 1) WHERE id = $1", botObj.ID)
-
-	// List bots
-	code, bots := env.getList("/api/bots")
-	if code != 200 {
-		t.Fatalf("list bots: got %d", code)
-	}
-	if len(bots) != 1 {
-		t.Fatalf("want 1 bot, got %d", len(bots))
-	}
-
-	// Create channel
-	result := env.post("/api/channels", map[string]string{
-		"bot_id": botObj.ID,
-		"name":   "通道1",
-		"handle": "ch1",
-	})
-	if _, ok := result["error"]; ok {
-		t.Fatalf("create channel: %v", result["error"])
-	}
-	chID := result["id"].(string)
-	if result["handle"] != "ch1" {
-		t.Errorf("handle = %v, want ch1", result["handle"])
-	}
-
-	// Create second channel
-	result = env.post("/api/channels", map[string]string{
-		"bot_id": botObj.ID,
-		"name":   "通道2",
-		"handle": "ch2",
-	})
-	if _, ok := result["error"]; ok {
-		t.Fatalf("create channel 2: %v", result["error"])
-	}
-
-	// List channels
-	code, channels := env.getList("/api/channels")
-	if code != 200 || len(channels) != 2 {
-		t.Fatalf("list channels: code=%d, count=%d", code, len(channels))
-	}
-
-	// Update channel handle
-	code, _ = env.put("/api/channels/"+chID, map[string]any{
-		"handle": "newhandle",
-	})
-	if code != 200 {
-		t.Errorf("update channel: got %d", code)
-	}
-
-	// Delete channel
-	code = env.del("/api/channels/" + chID)
-	if code != 200 {
-		t.Errorf("delete channel: got %d", code)
-	}
+	return b
 }
 
-func TestMentionRouting(t *testing.T) {
-	env := setup(t)
-	defer env.close()
-
-	env.register("testuser", "password123")
-
-	// Get user ID
-	_, me := env.get("/api/auth/me")
-	userID := me["id"].(string)
-
-	// Create bot
-	botObj, _ := env.db.CreateBot(userID, "TestBot", "mock", mockProvider.Credentials())
-
-	// Start bot with mock provider
-	err := env.mgr.StartBot(context.Background(), botObj)
-	if err != nil {
-		t.Fatalf("start bot: %v", err)
-	}
-
-	// Create channels with handles
-	ch1, _ := env.db.CreateChannel(botObj.ID, "支持", "support", nil)
-	ch2, _ := env.db.CreateChannel(botObj.ID, "销售", "sales", nil)
-	chAll, _ := env.db.CreateChannel(botObj.ID, "全部", "", nil) // no handle, catches all via filter
-
-	// Connect WebSocket for each channel
-	ws1 := env.connectWS(t, ch1.APIKey)
-	defer ws1.Close()
-	ws2 := env.connectWS(t, ch2.APIKey)
-	defer ws2.Close()
-	wsAll := env.connectWS(t, chAll.APIKey)
-	defer wsAll.Close()
-
-	// Read init messages
-	readWS(t, ws1)
-	readWS(t, ws2)
-	readWS(t, wsAll)
-
-	// Get mock provider instance
-	inst, ok := env.mgr.GetInstance(botObj.ID)
-	if !ok {
-		t.Fatal("bot instance not found")
-	}
-	mockP := inst.Provider.(*mockProvider.Provider)
-
-	// Test 1: Message with @support should go to ch1 only
-	mockP.SimulateInbound(provider.InboundMessage{
-		ExternalID: "1",
-		Sender:     "user@wechat",
-		Timestamp:  time.Now().UnixMilli(),
-		Items:      []provider.MessageItem{{Type: "text", Text: "@support 帮我看看"}},
-	})
-
-	msg1 := readWSWithTimeout(t, ws1, 2*time.Second)
-	if msg1 == nil {
-		t.Error("ch1 (support) should receive @support message")
-	}
-
-	msg2 := readWSWithTimeout(t, ws2, 500*time.Millisecond)
-	if msg2 != nil {
-		t.Error("ch2 (sales) should NOT receive @support message")
-	}
-
-	msgAll := readWSWithTimeout(t, wsAll, 500*time.Millisecond)
-	if msgAll != nil {
-		t.Error("chAll should NOT receive @mention message (mention routing skips filter)")
-	}
-
-	// Test 2: Message without @mention should go to all channels (via filter)
-	// Reconnect ws2 and wsAll since deadline-based timeout may break gorilla websocket state
-	ws2.Close()
-	wsAll.Close()
-	ws2 = env.connectWS(t, ch2.APIKey)
-	defer ws2.Close()
-	wsAll = env.connectWS(t, chAll.APIKey)
-	defer wsAll.Close()
-	readWS(t, ws2)   // consume init
-	readWS(t, wsAll)  // consume init
-
-	mockP.SimulateInbound(provider.InboundMessage{
-		ExternalID: "2",
-		Sender:     "user@wechat",
-		Timestamp:  time.Now().UnixMilli(),
-		Items:      []provider.MessageItem{{Type: "text", Text: "普通消息"}},
-	})
-
-	msg1 = readWSWithTimeout(t, ws1, 2*time.Second)
-	if msg1 == nil {
-		t.Error("ch1 should receive non-mention message via filter")
-	}
-	msg2 = readWSWithTimeout(t, ws2, 2*time.Second)
-	if msg2 == nil {
-		t.Error("ch2 should receive non-mention message via filter")
-	}
-	msgAll = readWSWithTimeout(t, wsAll, 2*time.Second)
-	if msgAll == nil {
-		t.Error("chAll should receive non-mention message via filter")
-	}
-
-	// Test 3: Message with @sales should go to ch2 only
-	// Reconnect ws1 and wsAll
-	ws1.Close()
-	wsAll.Close()
-	ws1 = env.connectWS(t, ch1.APIKey)
-	defer ws1.Close()
-	wsAll = env.connectWS(t, chAll.APIKey)
-	defer wsAll.Close()
-	readWS(t, ws1)
-	readWS(t, wsAll)
-
-	mockP.SimulateInbound(provider.InboundMessage{
-		ExternalID: "3",
-		Sender:     "user@wechat",
-		Timestamp:  time.Now().UnixMilli(),
-		Items:      []provider.MessageItem{{Type: "text", Text: "@sales 价格多少"}},
-	})
-
-	msg2 = readWSWithTimeout(t, ws2, 2*time.Second)
-	if msg2 == nil {
-		t.Error("ch2 (sales) should receive @sales message")
-	}
-
-	msg1 = readWSWithTimeout(t, ws1, 500*time.Millisecond)
-	if msg1 != nil {
-		t.Error("ch1 (support) should NOT receive @sales message")
-	}
-
-	// Test 4: Message with @unknown should go nowhere
-	ws1.Close()
-	ws2.Close()
-	wsAll.Close()
-	ws1 = env.connectWS(t, ch1.APIKey)
-	defer ws1.Close()
-	ws2 = env.connectWS(t, ch2.APIKey)
-	defer ws2.Close()
-	wsAll = env.connectWS(t, chAll.APIKey)
-	defer wsAll.Close()
-	// Drain init + any replayed messages
-	drainWS(t, ws1)
-	drainWS(t, ws2)
-	drainWS(t, wsAll)
-
-	mockP.SimulateInbound(provider.InboundMessage{
-		ExternalID: "4",
-		Sender:     "user@wechat",
-		Timestamp:  time.Now().UnixMilli(),
-		Items:      []provider.MessageItem{{Type: "text", Text: "@unknown test"}},
-	})
-
-	msg1 = readWSWithTimeout(t, ws1, 500*time.Millisecond)
-	msg2 = readWSWithTimeout(t, ws2, 500*time.Millisecond)
-	msgAll = readWSWithTimeout(t, wsAll, 500*time.Millisecond)
-	if msg1 != nil || msg2 != nil || msgAll != nil {
-		t.Error("@unknown should not route to any channel")
-	}
-}
-
-func TestMessageOwnershipCheck(t *testing.T) {
-	env := setup(t)
-	defer env.close()
-
-	// Create two users
-	env.register("user1", "password123")
-	_, me := env.get("/api/auth/me")
-	user1ID := me["id"].(string)
-
-	// Create bot for user1
-	botObj, _ := env.db.CreateBot(user1ID, "User1Bot", "mock", mockProvider.Credentials())
-
-	// Logout and register user2
-	env.post("/api/auth/logout", nil)
-	env.register("user2", "password123")
-
-	// user2 should not see user1's messages
-	code, msgs := env.getList(fmt.Sprintf("/api/messages?bot_id=%s", botObj.ID))
-	if code != 404 {
-		t.Errorf("user2 accessing user1's bot messages: got %d, want 404, msgs=%v", code, msgs)
-	}
-}
-
-func TestChannelOwnershipCheck(t *testing.T) {
-	env := setup(t)
-	defer env.close()
-
-	env.register("user1", "password123")
-	_, me := env.get("/api/auth/me")
-	user1ID := me["id"].(string)
-
-	botObj, _ := env.db.CreateBot(user1ID, "Bot1", "mock", mockProvider.Credentials())
-	ch, _ := env.db.CreateChannel(botObj.ID, "Chan1", "c1", nil)
-
-	// Logout and register user2
-	env.post("/api/auth/logout", nil)
-	env.register("user2", "password123")
-
-	// user2 should not be able to delete user1's channel
-	code := env.del("/api/channels/" + ch.ID)
-	if code != 404 {
-		t.Errorf("user2 deleting user1's channel: got %d, want 404", code)
-	}
-}
-
-// --- WebSocket helpers ---
+// ==================== WebSocket helpers ====================
 
 func (e *testEnv) connectWS(t *testing.T, apiKey string) *websocket.Conn {
 	t.Helper()
@@ -503,28 +222,832 @@ func (e *testEnv) connectWS(t *testing.T, apiKey string) *websocket.Conn {
 
 func readWS(t *testing.T, ws *websocket.Conn) map[string]any {
 	t.Helper()
-	return readWSWithTimeout(t, ws, 2*time.Second)
+	return readWSTimeout(t, ws, 2*time.Second)
 }
 
-// drainWS reads all pending messages until timeout.
-func drainWS(t *testing.T, ws *websocket.Conn) {
+func readWSTimeout(t *testing.T, ws *websocket.Conn, d time.Duration) map[string]any {
 	t.Helper()
-	for {
-		if readWSWithTimeout(t, ws, 300*time.Millisecond) == nil {
-			return
-		}
-	}
-}
-
-func readWSWithTimeout(t *testing.T, ws *websocket.Conn, timeout time.Duration) map[string]any {
-	t.Helper()
-	ws.SetReadDeadline(time.Now().Add(timeout))
+	ws.SetReadDeadline(time.Now().Add(d))
 	_, msg, err := ws.ReadMessage()
-	ws.SetReadDeadline(time.Time{}) // reset
+	ws.SetReadDeadline(time.Time{})
 	if err != nil {
 		return nil
 	}
-	var result map[string]any
-	json.Unmarshal(msg, &result)
-	return result
+	var m map[string]any
+	json.Unmarshal(msg, &m)
+	return m
+}
+
+func drainWS(t *testing.T, ws *websocket.Conn) {
+	t.Helper()
+	for readWSTimeout(t, ws, 300*time.Millisecond) != nil {
+	}
+}
+
+func assertCode(t *testing.T, label string, got, want int) {
+	t.Helper()
+	if got != want {
+		t.Errorf("%s: got %d, want %d", label, got, want)
+	}
+}
+
+// ==================== Auth tests ====================
+
+func TestRegisterAndLogin(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	// First user → admin
+	env.register("admin", "password123")
+	code, me := env.get("/api/auth/me")
+	assertCode(t, "GET /me", code, 200)
+	if me["role"] != "admin" {
+		t.Errorf("first user role = %v, want admin", me["role"])
+	}
+
+	// Logout
+	env.post("/api/auth/logout", nil)
+	code, _ = env.get("/api/auth/me")
+	assertCode(t, "after logout", code, 401)
+
+	// Login
+	env.login("admin", "password123")
+	code, _ = env.get("/api/auth/me")
+	assertCode(t, "after login", code, 200)
+
+	// Wrong password
+	env.post("/api/auth/logout", nil)
+	code, _ = env.postCode("/api/auth/login", map[string]string{"username": "admin", "password": "wrong"})
+	assertCode(t, "wrong password", code, 401)
+
+	// Second user → member
+	env.register("member1", "password123")
+	_, me = env.get("/api/auth/me")
+	if me["role"] != "member" {
+		t.Errorf("second user role = %v, want member", me["role"])
+	}
+}
+
+func TestRegisterValidation(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	// Empty username
+	code, _ := env.postCode("/api/auth/register", map[string]string{"username": "", "password": "password123"})
+	assertCode(t, "empty username", code, 400)
+
+	// Short password
+	code, _ = env.postCode("/api/auth/register", map[string]string{"username": "u", "password": "short"})
+	assertCode(t, "short password", code, 400)
+
+	// Duplicate username
+	env.register("taken", "password123")
+	env.post("/api/auth/logout", nil)
+	code, _ = env.postCode("/api/auth/register", map[string]string{"username": "taken", "password": "password123"})
+	assertCode(t, "duplicate username", code, 409)
+}
+
+func TestProfileUpdate(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("profileuser", "password123")
+
+	code, _ := env.put("/api/auth/profile", map[string]string{
+		"display_name": "New Name",
+		"email":        "test@example.com",
+	})
+	assertCode(t, "update profile", code, 200)
+
+	_, me := env.get("/api/auth/me")
+	if me["display_name"] != "New Name" {
+		t.Errorf("display_name = %v", me["display_name"])
+	}
+}
+
+func TestPasswordChange(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("pwuser", "oldpass123")
+
+	// Change password
+	code, _ := env.put("/api/auth/password", map[string]string{
+		"old_password": "oldpass123",
+		"new_password": "newpass123",
+	})
+	assertCode(t, "change password", code, 200)
+
+	// Old password should fail
+	env.post("/api/auth/logout", nil)
+	code, _ = env.postCode("/api/auth/login", map[string]string{"username": "pwuser", "password": "oldpass123"})
+	assertCode(t, "old password", code, 401)
+
+	// New password should work
+	env.login("pwuser", "newpass123")
+
+	// Wrong old password
+	code, _ = env.put("/api/auth/password", map[string]string{
+		"old_password": "wrongold",
+		"new_password": "another123",
+	})
+	assertCode(t, "wrong old password", code, 401)
+}
+
+func TestProtectedRoutesRequireAuth(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	paths := []string{"/api/auth/me", "/api/bots", "/api/channels", "/api/stats", "/api/messages?bot_id=x"}
+	for _, p := range paths {
+		code, _ := env.get(p)
+		assertCode(t, "unauth GET "+p, code, 401)
+	}
+}
+
+// ==================== OAuth providers ====================
+
+func TestOAuthProviders(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	code, result := env.get("/api/auth/oauth/providers")
+	assertCode(t, "GET providers", code, 200)
+	// No providers configured → empty list
+	providers := result["providers"].([]any)
+	if len(providers) != 0 {
+		t.Errorf("expected 0 providers, got %d", len(providers))
+	}
+}
+
+func TestOAuthRedirectUnknownProvider(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	// Don't follow redirects
+	env.client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	resp, _ := env.client.Get(env.srv.URL + "/api/auth/oauth/unknown")
+	assertCode(t, "unknown provider", resp.StatusCode, 400)
+}
+
+func TestLinkedAccounts(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("oauthuser", "password123")
+
+	// List linked accounts (should be empty)
+	code, accounts := env.getList("/api/auth/linked-accounts")
+	assertCode(t, "list accounts", code, 200)
+	if accounts != nil && len(accounts) > 0 {
+		t.Errorf("expected 0 linked accounts, got %d", len(accounts))
+	}
+
+	// Unlink non-existent
+	code, _ = env.del("/api/auth/linked-accounts/github")
+	assertCode(t, "unlink non-existent", code, 404)
+}
+
+// ==================== Bot CRUD ====================
+
+func TestBotCRUD(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("botowner", "password123")
+	botObj := env.createBotForUser("TestBot")
+
+	// List bots
+	code, bots := env.getList("/api/bots")
+	assertCode(t, "list bots", code, 200)
+	if len(bots) != 1 {
+		t.Fatalf("want 1 bot, got %d", len(bots))
+	}
+
+	// Rename bot
+	code, _ = env.put("/api/bots/"+botObj.ID+"/name", map[string]string{"name": "Renamed"})
+	assertCode(t, "rename bot", code, 200)
+
+	// Verify rename
+	code, bots = env.getList("/api/bots")
+	b := bots[0].(map[string]any)
+	if b["name"] != "Renamed" {
+		t.Errorf("name after rename = %v", b["name"])
+	}
+
+	// Reconnect
+	code, _ = env.postCode("/api/bots/"+botObj.ID+"/reconnect", nil)
+	assertCode(t, "reconnect", code, 200)
+
+	// Delete bot
+	code, _ = env.del("/api/bots/" + botObj.ID)
+	assertCode(t, "delete bot", code, 200)
+
+	code, bots = env.getList("/api/bots")
+	if len(bots) != 0 {
+		t.Errorf("bots after delete = %d", len(bots))
+	}
+}
+
+func TestBotOwnershipIsolation(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	// User1 creates bot
+	env.register("user1", "password123")
+	botObj := env.createBotForUser("User1Bot")
+
+	// Switch to user2
+	env.post("/api/auth/logout", nil)
+	env.register("user2", "password123")
+
+	// User2 can't see user1's bots
+	_, bots := env.getList("/api/bots")
+	if len(bots) != 0 {
+		t.Error("user2 should not see user1's bots")
+	}
+
+	// User2 can't rename user1's bot
+	code, _ := env.put("/api/bots/"+botObj.ID+"/name", map[string]string{"name": "hacked"})
+	assertCode(t, "rename other's bot", code, 404)
+
+	// User2 can't delete user1's bot
+	code, _ = env.del("/api/bots/" + botObj.ID)
+	assertCode(t, "delete other's bot", code, 404)
+
+	// User2 can't reconnect user1's bot
+	code, _ = env.postCode("/api/bots/"+botObj.ID+"/reconnect", nil)
+	assertCode(t, "reconnect other's bot", code, 404)
+}
+
+// ==================== Channel CRUD ====================
+
+func TestChannelCRUD(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("chowner", "password123")
+	botObj := env.createBotForUser("Bot1")
+
+	// Create channel
+	code, ch := env.postCode("/api/channels", map[string]string{
+		"bot_id": botObj.ID, "name": "通道1", "handle": "support",
+	})
+	assertCode(t, "create channel", code, 201)
+	chID := ch["id"].(string)
+	if ch["handle"] != "support" {
+		t.Errorf("handle = %v", ch["handle"])
+	}
+	if ch["api_key"] == nil || ch["api_key"] == "" {
+		t.Error("api_key should be generated")
+	}
+
+	// List channels
+	code, chs := env.getList("/api/channels")
+	assertCode(t, "list channels", code, 200)
+	if len(chs) != 1 {
+		t.Fatalf("want 1 channel, got %d", len(chs))
+	}
+
+	// Update channel
+	code, _ = env.put("/api/channels/"+chID, map[string]any{
+		"name": "新名称", "handle": "newhandle", "enabled": false,
+	})
+	assertCode(t, "update channel", code, 200)
+
+	// Rotate key
+	code, rotated := env.postCode("/api/channels/"+chID+"/rotate-key", nil)
+	assertCode(t, "rotate key", code, 200)
+	if rotated["api_key"] == nil || rotated["api_key"] == "" {
+		t.Error("rotated key should be returned")
+	}
+
+	// Delete channel
+	code, _ = env.del("/api/channels/" + chID)
+	assertCode(t, "delete channel", code, 200)
+
+	code, chs = env.getList("/api/channels")
+	if len(chs) != 0 {
+		t.Errorf("channels after delete = %d", len(chs))
+	}
+}
+
+func TestChannelValidation(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("chval", "password123")
+	botObj := env.createBotForUser("Bot1")
+
+	// Missing name
+	code, _ := env.postCode("/api/channels", map[string]string{"bot_id": botObj.ID})
+	assertCode(t, "missing name", code, 400)
+
+	// Missing bot_id
+	code, _ = env.postCode("/api/channels", map[string]string{"name": "test"})
+	assertCode(t, "missing bot_id", code, 400)
+
+	// Non-existent bot
+	code, _ = env.postCode("/api/channels", map[string]string{"bot_id": "nonexistent", "name": "test"})
+	assertCode(t, "bad bot_id", code, 404)
+}
+
+func TestChannelOwnershipIsolation(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("user1", "password123")
+	botObj := env.createBotForUser("Bot1")
+	ch, _ := env.db.CreateChannel(botObj.ID, "Chan1", "c1", nil)
+
+	env.post("/api/auth/logout", nil)
+	env.register("user2", "password123")
+
+	// User2 can't update/delete/rotate user1's channel
+	code, _ := env.put("/api/channels/"+ch.ID, map[string]any{"name": "hacked"})
+	assertCode(t, "update other's channel", code, 404)
+
+	code, _ = env.del("/api/channels/" + ch.ID)
+	assertCode(t, "delete other's channel", code, 404)
+
+	code, _ = env.postCode("/api/channels/"+ch.ID+"/rotate-key", nil)
+	assertCode(t, "rotate other's key", code, 404)
+
+	// User2 can't create channel on user1's bot
+	code, _ = env.postCode("/api/channels", map[string]string{"bot_id": botObj.ID, "name": "test"})
+	assertCode(t, "create on other's bot", code, 404)
+}
+
+// ==================== Messages ====================
+
+func TestMessages(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("msguser", "password123")
+	botObj := env.createBotForUser("Bot1")
+
+	// No messages yet
+	code, msgs := env.getList(fmt.Sprintf("/api/messages?bot_id=%s", botObj.ID))
+	assertCode(t, "empty messages", code, 200)
+
+	// Save some messages
+	payload, _ := json.Marshal(map[string]string{"content": "hello"})
+	for i := 0; i < 3; i++ {
+		env.db.SaveMessage(&database.Message{
+			BotID: botObj.ID, Direction: "inbound", Sender: "user@wechat",
+			MsgType: "text", Payload: payload,
+		})
+	}
+
+	code, msgs = env.getList(fmt.Sprintf("/api/messages?bot_id=%s", botObj.ID))
+	assertCode(t, "list messages", code, 200)
+	if len(msgs) != 3 {
+		t.Errorf("want 3 messages, got %d", len(msgs))
+	}
+
+	// Missing bot_id
+	code, _ = env.get("/api/messages")
+	assertCode(t, "missing bot_id", code, 400)
+}
+
+func TestMessageOwnershipIsolation(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("user1", "password123")
+	botObj := env.createBotForUser("User1Bot")
+
+	env.post("/api/auth/logout", nil)
+	env.register("user2", "password123")
+
+	code, _ := env.get(fmt.Sprintf("/api/messages?bot_id=%s", botObj.ID))
+	assertCode(t, "user2 reading user1 messages", code, 404)
+}
+
+// ==================== Stats ====================
+
+func TestStats(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("statsuser", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.db.CreateChannel(botObj.ID, "Ch1", "", nil)
+
+	code, stats := env.get("/api/stats")
+	assertCode(t, "stats", code, 200)
+	if stats["total_bots"] != float64(1) {
+		t.Errorf("total_bots = %v", stats["total_bots"])
+	}
+	if stats["total_channels"] != float64(1) {
+		t.Errorf("total_channels = %v", stats["total_channels"])
+	}
+}
+
+// ==================== Bot contacts ====================
+
+func TestBotContacts(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("contactuser", "password123")
+	botObj := env.createBotForUser("Bot1")
+
+	// Save inbound messages from different senders
+	payload, _ := json.Marshal(map[string]string{"content": "hi"})
+	for _, sender := range []string{"alice@wechat", "bob@wechat", "alice@wechat"} {
+		env.db.SaveMessage(&database.Message{
+			BotID: botObj.ID, Direction: "inbound", Sender: sender,
+			MsgType: "text", Payload: payload,
+		})
+	}
+
+	code, contacts := env.getList(fmt.Sprintf("/api/bots/%s/contacts", botObj.ID))
+	assertCode(t, "contacts", code, 200)
+	if len(contacts) != 2 {
+		t.Errorf("want 2 contacts, got %d", len(contacts))
+	}
+}
+
+func TestBotContactsOwnership(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("user1", "password123")
+	botObj := env.createBotForUser("Bot1")
+
+	env.post("/api/auth/logout", nil)
+	env.register("user2", "password123")
+
+	code, _ := env.get(fmt.Sprintf("/api/bots/%s/contacts", botObj.ID))
+	assertCode(t, "contacts other's bot", code, 404)
+}
+
+// ==================== Bot send ====================
+
+func TestBotSend(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("senduser", "password123")
+	botObj := env.createBotForUser("Bot1")
+
+	// Start bot
+	env.mgr.StartBot(context.Background(), botObj)
+
+	// Send
+	code, result := env.postCode("/api/bots/"+botObj.ID+"/send", map[string]string{
+		"text": "hello from api",
+	})
+	assertCode(t, "send", code, 200)
+	if result["client_id"] == nil {
+		t.Error("expected client_id in response")
+	}
+
+	// Verify mock provider received it
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	sent := inst.Provider.(*mockProvider.Provider).SentMessages()
+	if len(sent) != 1 || sent[0].Text != "hello from api" {
+		t.Errorf("sent = %+v", sent)
+	}
+
+	// Send without text
+	code, _ = env.postCode("/api/bots/"+botObj.ID+"/send", map[string]string{})
+	assertCode(t, "send no text", code, 400)
+
+	// Send to disconnected bot
+	env.mgr.StopBot(botObj.ID)
+	code, _ = env.postCode("/api/bots/"+botObj.ID+"/send", map[string]string{"text": "fail"})
+	assertCode(t, "send disconnected", code, 503)
+}
+
+// ==================== Admin user management ====================
+
+func TestAdminUserManagement(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("admin", "password123") // first user = admin
+	adminID := env.userID()
+
+	// Create user via admin API
+	code, created := env.postCode("/api/users", map[string]string{
+		"username": "newuser", "password": "password123", "role": "member",
+	})
+	assertCode(t, "create user", code, 201)
+	newID := created["id"].(string)
+
+	// List users
+	code, users := env.getList("/api/users")
+	assertCode(t, "list users", code, 200)
+	if len(users) != 2 {
+		t.Errorf("want 2 users, got %d", len(users))
+	}
+
+	// Update role
+	code, _ = env.put("/api/users/"+newID+"/role", map[string]string{"role": "admin"})
+	assertCode(t, "update role", code, 200)
+
+	// Can't demote self
+	code, _ = env.put("/api/users/"+adminID+"/role", map[string]string{"role": "member"})
+	assertCode(t, "self demote", code, 400)
+
+	// Update status
+	code, _ = env.put("/api/users/"+newID+"/status", map[string]string{"status": "disabled"})
+	assertCode(t, "disable user", code, 200)
+
+	// Can't disable self
+	code, _ = env.put("/api/users/"+adminID+"/status", map[string]string{"status": "disabled"})
+	assertCode(t, "self disable", code, 400)
+
+	// Reset password
+	code, _ = env.put("/api/users/"+newID+"/password", map[string]string{"password": "newpass123"})
+	assertCode(t, "reset password", code, 200)
+
+	// Delete user
+	code, _ = env.del("/api/users/" + newID)
+	assertCode(t, "delete user", code, 200)
+
+	// Can't delete self
+	code, _ = env.del("/api/users/" + adminID)
+	assertCode(t, "self delete", code, 400)
+}
+
+func TestAdminRequiresAdminRole(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("admin", "password123")
+	env.post("/api/auth/logout", nil)
+	env.register("member", "password123")
+
+	// Member can't access admin APIs
+	code, _ := env.getList("/api/users")
+	assertCode(t, "member list users", code, 403)
+
+	code, _ = env.postCode("/api/users", map[string]string{"username": "x", "password": "password123"})
+	assertCode(t, "member create user", code, 403)
+}
+
+// ==================== Admin OAuth config ====================
+
+func TestAdminOAuthConfig(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("admin", "password123")
+
+	// Get config (empty)
+	code, config := env.get("/api/admin/config/oauth")
+	assertCode(t, "get config", code, 200)
+
+	// Set GitHub config
+	code, _ = env.put("/api/admin/config/oauth/github", map[string]string{
+		"client_id": "test-id", "client_secret": "test-secret",
+	})
+	assertCode(t, "set github", code, 200)
+
+	// Verify it's set
+	code, config = env.get("/api/admin/config/oauth")
+	assertCode(t, "get after set", code, 200)
+	gh := config["github"].(map[string]any)
+	if gh["client_id"] != "test-id" {
+		t.Errorf("client_id = %v", gh["client_id"])
+	}
+	if gh["source"] != "db" {
+		t.Errorf("source = %v, want db", gh["source"])
+	}
+	// Secret should be masked
+	secret := gh["client_secret"].(string)
+	if secret == "test-secret" {
+		t.Error("secret should be masked")
+	}
+
+	// OAuth providers should now include github
+	code, providers := env.get("/api/auth/oauth/providers")
+	assertCode(t, "providers after config", code, 200)
+	pList := providers["providers"].([]any)
+	found := false
+	for _, p := range pList {
+		if p == "github" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("github should be in providers list after config")
+	}
+
+	// Delete config
+	code, _ = env.del("/api/admin/config/oauth/github")
+	assertCode(t, "delete github config", code, 200)
+
+	// Unknown provider
+	code, _ = env.put("/api/admin/config/oauth/unknown", map[string]string{"client_id": "x"})
+	assertCode(t, "unknown provider", code, 400)
+}
+
+func TestAdminOAuthConfigRequiresAdmin(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("admin", "password123")
+	env.post("/api/auth/logout", nil)
+	env.register("member", "password123")
+
+	code, _ := env.get("/api/admin/config/oauth")
+	assertCode(t, "member get config", code, 403)
+
+	code, _ = env.put("/api/admin/config/oauth/github", map[string]string{"client_id": "x"})
+	assertCode(t, "member set config", code, 403)
+}
+
+// ==================== WebSocket ====================
+
+func TestWebSocketInitAndPing(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("wsuser", "password123")
+	botObj := env.createBotForUser("Bot1")
+	ch, _ := env.db.CreateChannel(botObj.ID, "WsChan", "", nil)
+
+	ws := env.connectWS(t, ch.APIKey)
+	defer ws.Close()
+
+	// Should receive init message
+	init := readWS(t, ws)
+	if init == nil || init["type"] != "init" {
+		t.Fatalf("expected init message, got %v", init)
+	}
+	data := init["data"].(map[string]any)
+	if data["channel_id"] != ch.ID {
+		t.Errorf("channel_id = %v, want %v", data["channel_id"], ch.ID)
+	}
+
+	// Ping/pong
+	ws.WriteJSON(map[string]string{"type": "ping"})
+	pong := readWS(t, ws)
+	if pong == nil || pong["type"] != "pong" {
+		t.Errorf("expected pong, got %v", pong)
+	}
+}
+
+func TestWebSocketInvalidKey(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	wsURL := "ws" + env.srv.URL[4:] + "/api/ws?key=invalid"
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Error("should fail with invalid key")
+	}
+	if resp != nil && resp.StatusCode != 401 {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestWebSocketNoKey(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	wsURL := "ws" + env.srv.URL[4:] + "/api/ws"
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Error("should fail without key")
+	}
+	if resp != nil && resp.StatusCode != 401 {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestWebSocketSendText(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("wssend", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+	ch, _ := env.db.CreateChannel(botObj.ID, "SendChan", "", nil)
+
+	ws := env.connectWS(t, ch.APIKey)
+	defer ws.Close()
+	readWS(t, ws) // init
+
+	// Send text
+	ws.WriteJSON(map[string]any{
+		"type":   "send_text",
+		"req_id": "r1",
+		"data":   map[string]string{"text": "hello via ws"},
+	})
+
+	ack := readWS(t, ws)
+	if ack == nil || ack["type"] != "send_ack" {
+		t.Fatalf("expected send_ack, got %v", ack)
+	}
+	ackData := ack["data"].(map[string]any)
+	if ackData["success"] != true {
+		t.Errorf("ack success = %v, error = %v", ackData["success"], ackData["error"])
+	}
+
+	// Verify mock provider received
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	sent := inst.Provider.(*mockProvider.Provider).SentMessages()
+	if len(sent) != 1 || sent[0].Text != "hello via ws" {
+		t.Errorf("sent = %+v", sent)
+	}
+}
+
+// ==================== @Mention routing ====================
+
+func TestMentionRouting(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("mentionuser", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+
+	ch1, _ := env.db.CreateChannel(botObj.ID, "支持", "support", nil)
+	ch2, _ := env.db.CreateChannel(botObj.ID, "销售", "sales", nil)
+	chAll, _ := env.db.CreateChannel(botObj.ID, "全部", "", nil)
+
+	ws1 := env.connectWS(t, ch1.APIKey)
+	defer ws1.Close()
+	ws2 := env.connectWS(t, ch2.APIKey)
+	defer ws2.Close()
+	wsAll := env.connectWS(t, chAll.APIKey)
+	defer wsAll.Close()
+	readWS(t, ws1)
+	readWS(t, ws2)
+	readWS(t, wsAll)
+
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	mock := inst.Provider.(*mockProvider.Provider)
+
+	// @support → ch1 only
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "1", Sender: "u@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "@support help"}},
+	})
+	if readWSTimeout(t, ws1, 2*time.Second) == nil {
+		t.Error("ch1 should receive @support")
+	}
+	if readWSTimeout(t, ws2, 300*time.Millisecond) != nil {
+		t.Error("ch2 should NOT receive @support")
+	}
+	if readWSTimeout(t, wsAll, 300*time.Millisecond) != nil {
+		t.Error("chAll should NOT receive @support")
+	}
+
+	// No mention → all channels
+	ws2.Close()
+	wsAll.Close()
+	ws2 = env.connectWS(t, ch2.APIKey)
+	defer ws2.Close()
+	wsAll = env.connectWS(t, chAll.APIKey)
+	defer wsAll.Close()
+	readWS(t, ws2)
+	readWS(t, wsAll)
+
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "2", Sender: "u@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "普通消息"}},
+	})
+	if readWSTimeout(t, ws1, 2*time.Second) == nil {
+		t.Error("ch1 should receive non-mention")
+	}
+	if readWSTimeout(t, ws2, 2*time.Second) == nil {
+		t.Error("ch2 should receive non-mention")
+	}
+	if readWSTimeout(t, wsAll, 2*time.Second) == nil {
+		t.Error("chAll should receive non-mention")
+	}
+
+	// @unknown → nobody
+	ws1.Close()
+	ws2.Close()
+	wsAll.Close()
+	ws1 = env.connectWS(t, ch1.APIKey)
+	defer ws1.Close()
+	ws2 = env.connectWS(t, ch2.APIKey)
+	defer ws2.Close()
+	wsAll = env.connectWS(t, chAll.APIKey)
+	defer wsAll.Close()
+	drainWS(t, ws1)
+	drainWS(t, ws2)
+	drainWS(t, wsAll)
+
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "3", Sender: "u@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "@nobody test"}},
+	})
+	if readWSTimeout(t, ws1, 300*time.Millisecond) != nil ||
+		readWSTimeout(t, ws2, 300*time.Millisecond) != nil ||
+		readWSTimeout(t, wsAll, 300*time.Millisecond) != nil {
+		t.Error("@nobody should not route anywhere")
+	}
 }
