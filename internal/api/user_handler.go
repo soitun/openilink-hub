@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 
@@ -148,22 +150,18 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleResetUserPassword(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" {
-		jsonError(w, "password required", http.StatusBadRequest)
-		return
-	}
-	if len(req.Password) < 8 {
-		jsonError(w, "password must be at least 8 characters", http.StatusBadRequest)
-		return
-	}
 
-	hash := auth.HashPassword(req.Password)
+	// Generate random password
+	b := make([]byte, 12)
+	rand.Read(b)
+	password := base64.RawURLEncoding.EncodeToString(b)[:16]
+
+	hash := auth.HashPassword(password)
 	if err := s.DB.UpdateUserPassword(id, hash); err != nil {
 		jsonError(w, "update failed", http.StatusInternalServerError)
 		return
 	}
-	jsonOK(w)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"password": password})
 }

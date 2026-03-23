@@ -94,8 +94,7 @@ function UsersTab() {
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("member");
   const [error, setError] = useState("");
-  const [resetTarget, setResetTarget] = useState<string | null>(null);
-  const [resetPwd, setResetPwd] = useState("");
+  const [generatedPwd, setGeneratedPwd] = useState<{ username: string; password: string } | null>(null);
 
   async function load() { try { setUsers(await api.listUsers() || []); } catch {} }
   useEffect(() => { load(); }, []);
@@ -121,10 +120,12 @@ function UsersTab() {
     try { await api.updateUserStatus(user.id, s); load(); } catch (err: any) { setError(err.message); }
   }
 
-  async function handleResetPassword() {
-    if (!resetTarget || resetPwd.length < 8) { setError("密码至少 8 位"); return; }
-    try { await api.resetUserPassword(resetTarget, resetPwd); setResetTarget(null); setResetPwd(""); setError(""); }
-    catch (err: any) { setError(err.message); }
+  async function handleResetPassword(user: any) {
+    if (!confirm(`重置 ${user.username} 的密码？将生成随机密码。`)) return;
+    try {
+      const result = await api.resetUserPassword(user.id);
+      setGeneratedPwd({ username: user.username, password: result.password });
+    } catch (err: any) { setError(err.message); }
   }
 
   async function handleDelete(user: any) {
@@ -182,20 +183,27 @@ function UsersTab() {
             <div className="flex items-center gap-1">
               <button onClick={() => handleToggleRole(u)} className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-secondary cursor-pointer">{u.role === "admin" ? "降级" : "升级"}</button>
               <button onClick={() => handleToggleStatus(u)} className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-secondary cursor-pointer">{u.status === "active" ? "禁用" : "启用"}</button>
-              <button onClick={() => { setResetTarget(u.id); setResetPwd(""); }} className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-secondary cursor-pointer">重置密码</button>
+              <button onClick={() => handleResetPassword(u)} className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-secondary cursor-pointer">重置密码</button>
               <button onClick={() => handleDelete(u)} className="text-[10px] text-destructive px-1.5 py-0.5 rounded hover:bg-destructive/10 cursor-pointer">删除</button>
             </div>
           </div>
         ))}
       </div>
 
-      {resetTarget && (
-        <div className="p-3 rounded-lg border bg-card space-y-2">
-          <p className="text-xs font-medium">重置密码 — {users.find((u) => u.id === resetTarget)?.username}</p>
-          <div className="flex gap-2">
-            <Input type="password" placeholder="新密码（至少 8 位）" value={resetPwd} onChange={(e) => setResetPwd(e.target.value)} className="h-7 text-xs" autoFocus />
-            <Button size="sm" className="h-7 text-xs" onClick={handleResetPassword}>确认</Button>
-            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setResetTarget(null)}>取消</Button>
+      {/* Generated password modal */}
+      {generatedPwd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setGeneratedPwd(null)}>
+          <div className="bg-background border rounded-xl p-5 max-w-sm mx-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm font-medium">密码已重置 — {generatedPwd.username}</p>
+            <p className="text-xs text-muted-foreground">请将新密码发送给用户，此密码仅显示一次。</p>
+            <div className="flex items-center gap-2 p-2 rounded border bg-card">
+              <code className="flex-1 text-sm font-mono select-all">{generatedPwd.password}</code>
+              <button onClick={() => { navigator.clipboard.writeText(generatedPwd.password); }}
+                className="text-xs text-primary hover:underline cursor-pointer shrink-0">复制</button>
+            </div>
+            <div className="flex justify-end">
+              <Button size="sm" onClick={() => setGeneratedPwd(null)}>确认</Button>
+            </div>
           </div>
         </div>
       )}
