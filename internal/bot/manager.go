@@ -482,6 +482,13 @@ func (m *Manager) deliverToChannels(inst *Instance, msg provider.InboundMessage,
 			slog.Error("update channel last_seq failed", "channel", ch.ID, "err", err)
 		}
 
+		// Strip @handle prefix from content for this channel's delivery
+		deliveryContent := p.content
+		if ch.Handle != "" {
+			deliveryContent = strings.TrimSpace(strings.TrimPrefix(
+				strings.TrimSpace(deliveryContent), "@"+ch.Handle))
+		}
+
 		env := relay.NewEnvelope("message", relay.MessageData{
 			SeqID: msgID, ExternalID: msg.ExternalID,
 			Sender: msg.Sender, Recipient: msg.Recipient, GroupID: msg.GroupID,
@@ -492,7 +499,7 @@ func (m *Manager) deliverToChannels(inst *Instance, msg provider.InboundMessage,
 		d := sink.Delivery{
 			BotDBID: inst.DBID, Provider: inst.Provider, Channel: ch,
 			Message: msg, Envelope: env, SeqID: msgID,
-			MsgType: p.msgType, Content: p.content,
+			MsgType: p.msgType, Content: deliveryContent,
 		}
 		for _, s := range m.sinks {
 			wg.Add(1)
