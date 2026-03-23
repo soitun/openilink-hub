@@ -376,24 +376,77 @@ func (s *Webhook) Handle(d Delivery) {
 	s.sendReplies(d, replies)
 }
 
+// contentTypeToFileInfo maps Content-Type to (filename, itemType).
+func contentTypeToFileInfo(ct string) (fileName, itemType string) {
+	// Strip parameters (e.g. "image/png; charset=utf-8" → "image/png")
+	if i := strings.Index(ct, ";"); i > 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+
+	// Image types
+	imageExts := map[string]string{
+		"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
+		"image/webp": ".webp", "image/svg+xml": ".svg", "image/bmp": ".bmp",
+		"image/tiff": ".tiff", "image/x-icon": ".ico",
+	}
+	if ext, ok := imageExts[ct]; ok {
+		return "image" + ext, "image"
+	}
+	if strings.HasPrefix(ct, "image/") {
+		return "image." + strings.TrimPrefix(ct, "image/"), "image"
+	}
+
+	// Audio types
+	audioExts := map[string]string{
+		"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav",
+		"audio/ogg": ".ogg", "audio/aac": ".aac", "audio/flac": ".flac",
+		"audio/x-m4a": ".m4a", "audio/mp4": ".m4a",
+	}
+	if ext, ok := audioExts[ct]; ok {
+		return "audio" + ext, "voice"
+	}
+	if strings.HasPrefix(ct, "audio/") {
+		return "audio.mp3", "voice"
+	}
+
+	// Video types
+	videoExts := map[string]string{
+		"video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov",
+		"video/x-msvideo": ".avi", "video/x-matroska": ".mkv",
+	}
+	if ext, ok := videoExts[ct]; ok {
+		return "video" + ext, "video"
+	}
+	if strings.HasPrefix(ct, "video/") {
+		return "video.mp4", "video"
+	}
+
+	// Document types
+	docMap := map[string]string{
+		"application/pdf":  ".pdf",
+		"application/zip":  ".zip",
+		"application/gzip": ".gz",
+		"application/x-tar": ".tar",
+		"application/x-rar-compressed": ".rar",
+		"application/x-7z-compressed":  ".7z",
+		"application/msword":           ".doc",
+		"application/vnd.ms-excel":     ".xls",
+		"application/vnd.ms-powerpoint": ".ppt",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   ".docx",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         ".xlsx",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+	}
+	if ext, ok := docMap[ct]; ok {
+		return "document" + ext, "file"
+	}
+
+	// Fallback
+	return "file.bin", "file"
+}
+
 // forwardMedia sends the binary HTTP response as a media message through the bot.
 func (s *Webhook) forwardMedia(d Delivery, res *resData) {
-	ct := res.ContentType
-	fileName := "response"
-	switch {
-	case strings.HasPrefix(ct, "image/"):
-		ext := strings.TrimPrefix(ct, "image/")
-		if i := strings.Index(ext, ";"); i > 0 { ext = ext[:i] }
-		fileName = "image." + ext
-	case strings.HasPrefix(ct, "audio/"):
-		fileName = "audio.mp3"
-	case strings.HasPrefix(ct, "video/"):
-		fileName = "video.mp4"
-	case strings.HasPrefix(ct, "application/pdf"):
-		fileName = "document.pdf"
-	default:
-		fileName = "file.bin"
-	}
+	fileName, itemType := contentTypeToFileInfo(res.ContentType)
 
 	_, err := d.Provider.Send(context.Background(), provider.OutboundMessage{
 		Recipient: d.Message.Sender,
@@ -401,11 +454,11 @@ func (s *Webhook) forwardMedia(d Delivery, res *resData) {
 		FileName:  fileName,
 	})
 	if err != nil {
-		slog.Error("webhook forward media failed", "channel", d.Channel.ID, "err", err)
+		slog.Error("webhook forward media failed", "channel", d.Channel.ID, "type", itemType, "err", err)
 		return
 	}
 
-	itemList, _ := json.Marshal([]map[string]any{{"type": "file", "file_name": fileName}})
+	itemList, _ := json.Marshal([]map[string]any{{"type": itemType, "file_name": fileName}})
 	s.DB.SaveMessage(&database.Message{
 		BotID:       d.BotDBID,
 		Direction:   "outbound",
@@ -765,11 +818,32 @@ func applyAuth(req *reqData, auth *database.WebhookAuth, body []byte) {
 }
 
 func isBinaryContentType(ct string) bool {
-	return strings.HasPrefix(ct, "image/") ||
-		strings.HasPrefix(ct, "audio/") ||
-		strings.HasPrefix(ct, "video/") ||
-		strings.HasPrefix(ct, "application/octet-stream") ||
-		strings.HasPrefix(ct, "application/pdf")
+	if strings.Contains(ct, ";") {
+		ct = strings.TrimSpace(ct[:strings.Index(ct, ";")])
+	}
+	switch {
+	case strings.HasPrefix(ct, "image/"),
+		strings.HasPrefix(ct, "audio/"),
+		strings.HasPrefix(ct, "video/"):
+		return true
+	}
+	switch ct {
+	case "application/octet-stream",
+		"application/pdf",
+		"application/zip",
+		"application/gzip",
+		"application/x-tar",
+		"application/x-rar-compressed",
+		"application/x-7z-compressed",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",   // .docx
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",         // .xlsx
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
+		"application/msword",        // .doc
+		"application/vnd.ms-excel",  // .xls
+		"application/vnd.ms-powerpoint": // .ppt
+		return true
+	}
+	return false
 }
 
 func doHTTP(req *reqData, channelID string) *resData {
