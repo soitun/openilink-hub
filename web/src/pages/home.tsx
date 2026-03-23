@@ -1,6 +1,9 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import { HexagonBackground } from "../components/ui/hexagon-background";
+import { cn } from "../lib/utils";
 import { Bot, Puzzle, Webhook, Cable, Shield, Zap } from "lucide-react";
 
 const features = [
@@ -13,67 +16,107 @@ const features = [
 ];
 
 export function HomePage() {
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  useEffect(() => {
+    const updateScrollState = () => {
+      setIsScrolled(window.scrollY > 32);
+    };
+
+    updateScrollState();
+    window.addEventListener("scroll", updateScrollState, { passive: true });
+
+    return () => window.removeEventListener("scroll", updateScrollState);
+  }, []);
+
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b px-6 py-3 flex items-center justify-between">
-        <span className="font-semibold text-sm">OpenILink Hub</span>
-        <div className="flex items-center gap-2">
-          <Link to="/webhook-plugins">
-            <Button variant="ghost" size="sm" className="text-xs">插件市场</Button>
-          </Link>
-          <Link to="/login">
-            <Button size="sm" className="text-xs">登录</Button>
-          </Link>
+    <div className="relative isolate flex min-h-screen flex-col overflow-x-hidden bg-background">
+      <HexagonBackground className="opacity-90" hexagonSize={84} hexagonMargin={5} />
+
+      <div
+        className={cn(
+          "absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.18),transparent_42%),radial-gradient(circle_at_50%_12%,rgba(255,255,255,0.08),transparent_50%)] transition-opacity duration-500",
+          isScrolled ? "opacity-40" : "opacity-100"
+        )}
+      />
+      <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.04),transparent_20%,transparent_80%,rgba(0,0,0,0.18))]" />
+
+      <header className="sticky top-0 z-20 px-6 py-4 sm:px-8 lg:px-12">
+        <div
+          className={cn(
+            "mx-auto flex max-w-7xl items-center justify-between rounded-full px-4 sm:px-5 transition-all duration-300",
+            isScrolled
+              ? "border border-white/8 bg-[linear-gradient(to_bottom,rgba(10,10,10,0.76),rgba(18,18,18,0.56))] py-2.5 shadow-[0_14px_44px_rgba(0,0,0,0.34)] backdrop-blur-xl"
+              : "border border-white/5 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.05),rgba(255,255,255,0.015))] py-3 shadow-[0_10px_30px_rgba(0,0,0,0.16)] backdrop-blur-md"
+          )}
+        >
+          <span className="text-base font-semibold tracking-tight">OpenILink Hub</span>
+          <div className="flex items-center gap-3">
+            <Link to="/webhook-plugins">
+              <Button variant="ghost" size="sm" className="px-3 text-sm">插件市场</Button>
+            </Link>
+            <Link to="/login">
+              <Button size="sm" className="px-3 text-sm">登录</Button>
+            </Link>
+          </div>
         </div>
+        <div
+          className={cn(
+            "mx-auto mt-3 h-px max-w-6xl bg-gradient-to-r from-transparent to-transparent transition-all duration-300",
+            isScrolled ? "via-white/16 opacity-100" : "via-white/10 opacity-70"
+          )}
+        />
       </header>
 
-      <main className="flex-1">
+      <main className="relative z-10 flex-1 space-y-8 pb-20 sm:space-y-10 sm:pb-24">
         {/* Hero */}
-        <section className="py-16 px-6 text-center max-w-2xl mx-auto">
-          <h1 className="text-3xl font-bold tracking-tight">OpenILink Hub</h1>
-          <p className="mt-3 text-muted-foreground">
+        <section className="mx-auto max-w-3xl px-6 py-20 text-center sm:px-8 sm:py-24 lg:py-28">
+          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">OpenILink Hub</h1>
+          <p className="mt-5 text-base leading-8 text-muted-foreground sm:text-lg">
             开源的微信 Bot 管理与消息中继平台。连接你的微信，通过 WebSocket、HTTP API 或 Webhook 接收和发送消息。
           </p>
-          <div className="mt-6 flex justify-center gap-3">
+          <div className="mt-8 flex justify-center gap-4 sm:mt-10">
             <Link to="/login">
-              <Button>开始使用</Button>
+              <Button size="lg" className="px-5 text-sm">开始使用</Button>
             </Link>
             <a href="https://github.com/openilink/openilink-hub" target="_blank" rel="noopener">
-              <Button variant="outline">GitHub</Button>
+              <Button variant="outline" size="lg" className="px-5 text-sm">GitHub</Button>
             </a>
           </div>
         </section>
 
         {/* Features */}
-        <section className="px-6 pb-16 max-w-4xl mx-auto">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <section className="mx-auto max-w-6xl px-6 sm:px-8">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
             {features.map((f) => (
-              <Card key={f.title} className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <f.icon className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-medium">{f.title}</h3>
+              <Card key={f.title} className="rounded-2xl border border-white/8 bg-card/75 p-6 backdrop-blur-sm sm:p-7 space-y-4">
+                <div className="flex items-center gap-3">
+                  <f.icon className="h-5 w-5 text-primary" />
+                  <h3 className="text-base font-semibold tracking-tight">{f.title}</h3>
                 </div>
-                <p className="text-xs text-muted-foreground">{f.desc}</p>
+                <p className="text-sm leading-7 text-muted-foreground">{f.desc}</p>
               </Card>
             ))}
           </div>
         </section>
 
         {/* How it works */}
-        <section className="px-6 pb-16 max-w-2xl mx-auto">
-          <h2 className="text-lg font-semibold text-center mb-6">工作流程</h2>
-          <div className="space-y-4 text-sm">
+        <section className="mx-auto max-w-3xl px-6 pt-6 sm:px-8 sm:pt-8">
+          <h2 className="mb-10 text-center text-2xl font-semibold tracking-tight">工作流程</h2>
+          <div className="space-y-7 text-base">
             {[
               { step: "1", title: "扫码绑定", desc: "在 Hub 中扫码登录你的微信账号，系统自动创建 Bot" },
               { step: "2", title: "创建渠道", desc: "为 Bot 创建一个或多个渠道，每个渠道有独立的 API Key" },
               { step: "3", title: "接入集成", desc: "通过 WebSocket 实时监听，HTTP API 轮询，或 Webhook 推送接收消息" },
               { step: "4", title: "安装插件", desc: "从插件市场一键安装通知转发、AI 回复等 Webhook 插件" },
             ].map((s) => (
-              <div key={s.step} className="flex gap-3 items-start">
-                <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold shrink-0">{s.step}</span>
-                <div>
-                  <p className="font-medium">{s.title}</p>
-                  <p className="text-muted-foreground text-xs">{s.desc}</p>
+              <div key={s.step} className="flex items-start gap-4 sm:gap-5">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground sm:h-9 sm:w-9">
+                  {s.step}
+                </span>
+                <div className="space-y-1.5 pt-0.5">
+                  <p className="text-lg font-semibold tracking-tight">{s.title}</p>
+                  <p className="text-sm leading-7 text-muted-foreground sm:text-base">{s.desc}</p>
                 </div>
               </div>
             ))}
@@ -81,7 +124,7 @@ export function HomePage() {
         </section>
       </main>
 
-      <footer className="border-t py-4 text-center text-xs text-muted-foreground">
+      <footer className="relative z-10 border-t border-white/8 px-6 py-6 text-center text-sm text-muted-foreground sm:px-8">
         <a href="https://github.com/openilink/openilink-hub" target="_blank" rel="noopener" className="hover:text-primary">
           OpenILink Hub
         </a>
