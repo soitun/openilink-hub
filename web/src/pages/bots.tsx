@@ -191,8 +191,17 @@ function BotCard({
   return (
     <Card
       size="sm"
-      className="cursor-pointer hover:border-primary/50 transition-colors"
+      className="cursor-pointer hover:border-primary/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      role="button"
+      tabIndex={0}
+      aria-label={`查看 Bot：${bot.name}`}
       onClick={() => navigate(`/dashboard/bot/${bot.id}`)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          navigate(`/dashboard/bot/${bot.id}`);
+        }
+      }}
     >
       <CardHeader>
         <CardTitle>{bot.name}</CardTitle>
@@ -203,11 +212,11 @@ function BotCard({
               {bot.status === "session_expired" ? "已过期" : bot.status}
             </Badge>
             {bot.status !== "connected" && bot.status !== "session_expired" && (
-              <Button variant="ghost" size="sm" onClick={handleReconnect}>
+              <Button variant="ghost" size="sm" aria-label="重新连接 Bot" onClick={handleReconnect}>
                 <RefreshCw className="w-3.5 h-3.5" />
               </Button>
             )}
-            <Button variant="ghost" size="sm" onClick={handleDelete}>
+            <Button variant="ghost" size="sm" aria-label="删除 Bot" onClick={handleDelete}>
               <Trash2 className="w-3.5 h-3.5 text-destructive" />
             </Button>
           </div>
