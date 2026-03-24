@@ -16,7 +16,8 @@ type App struct {
 	Name        string          `json:"name"`
 	Slug        string          `json:"slug"`
 	Description string          `json:"description"`
-	Icon        string          `json:"icon,omitempty"`
+	Icon        string          `json:"icon,omitempty"`      // emoji icon
+	IconURL     string          `json:"icon_url,omitempty"`  // image URL icon
 	Homepage    string          `json:"homepage,omitempty"`
 	Tools       json.RawMessage `json:"tools"`
 	Events      json.RawMessage `json:"events"`
@@ -60,7 +61,8 @@ type AppInstallation struct {
 	// Joined
 	AppName string `json:"app_name,omitempty"`
 	AppSlug string `json:"app_slug,omitempty"`
-	AppIcon string `json:"app_icon,omitempty"`
+	AppIcon    string `json:"app_icon,omitempty"`
+	AppIconURL string `json:"app_icon_url,omitempty"`
 	BotName string `json:"bot_name,omitempty"`
 }
 
@@ -85,10 +87,10 @@ func (db *DB) CreateApp(app *App) (*App, error) {
 	if app.ClientSecret == "" {
 		app.ClientSecret = generateToken(32)
 	}
-	err := db.QueryRow(`INSERT INTO apps (id, owner_id, name, slug, description, icon, homepage, tools, events, scopes, setup_url, redirect_url, client_secret, listed)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+	err := db.QueryRow(`INSERT INTO apps (id, owner_id, name, slug, description, icon, icon_url, homepage, tools, events, scopes, setup_url, redirect_url, client_secret, listed)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		RETURNING EXTRACT(EPOCH FROM created_at)::BIGINT, EXTRACT(EPOCH FROM updated_at)::BIGINT`,
-		app.ID, app.OwnerID, app.Name, app.Slug, app.Description, app.Icon, app.Homepage,
+		app.ID, app.OwnerID, app.Name, app.Slug, app.Description, app.Icon, app.IconURL, app.Homepage,
 		app.Tools, app.Events, app.Scopes, app.SetupURL, app.RedirectURL, app.ClientSecret, app.Listed,
 	).Scan(&app.CreatedAt, &app.UpdatedAt)
 	app.Status = "active"
@@ -98,13 +100,13 @@ func (db *DB) CreateApp(app *App) (*App, error) {
 // GetApp returns an app by ID.
 func (db *DB) GetApp(id string) (*App, error) {
 	a := &App{}
-	err := db.QueryRow(`SELECT a.id, a.owner_id, a.name, a.slug, a.description, a.icon, a.homepage,
+	err := db.QueryRow(`SELECT a.id, a.owner_id, a.name, a.slug, a.description, a.icon, a.icon_url, a.homepage,
 		a.tools, a.events, a.scopes, a.setup_url, a.redirect_url, a.client_secret, a.listed, a.status,
 		EXTRACT(EPOCH FROM a.created_at)::BIGINT, EXTRACT(EPOCH FROM a.updated_at)::BIGINT,
 		COALESCE(u.username, '')
 		FROM apps a LEFT JOIN users u ON u.id = a.owner_id
 		WHERE a.id = $1`, id).Scan(
-		&a.ID, &a.OwnerID, &a.Name, &a.Slug, &a.Description, &a.Icon, &a.Homepage,
+		&a.ID, &a.OwnerID, &a.Name, &a.Slug, &a.Description, &a.Icon, &a.IconURL, &a.Homepage,
 		&a.Tools, &a.Events, &a.Scopes, &a.SetupURL, &a.RedirectURL, &a.ClientSecret, &a.Listed, &a.Status,
 		&a.CreatedAt, &a.UpdatedAt, &a.OwnerName)
 	if err != nil {
@@ -116,11 +118,11 @@ func (db *DB) GetApp(id string) (*App, error) {
 // GetAppBySlug returns an app by slug.
 func (db *DB) GetAppBySlug(slug string) (*App, error) {
 	a := &App{}
-	err := db.QueryRow(`SELECT id, owner_id, name, slug, description, icon, homepage,
+	err := db.QueryRow(`SELECT id, owner_id, name, slug, description, icon, icon_url, homepage,
 		tools, events, scopes, setup_url, redirect_url, client_secret, listed, status,
 		EXTRACT(EPOCH FROM created_at)::BIGINT, EXTRACT(EPOCH FROM updated_at)::BIGINT
 		FROM apps WHERE slug = $1`, slug).Scan(
-		&a.ID, &a.OwnerID, &a.Name, &a.Slug, &a.Description, &a.Icon, &a.Homepage,
+		&a.ID, &a.OwnerID, &a.Name, &a.Slug, &a.Description, &a.Icon, &a.IconURL, &a.Homepage,
 		&a.Tools, &a.Events, &a.Scopes, &a.SetupURL, &a.RedirectURL, &a.ClientSecret, &a.Listed, &a.Status,
 		&a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
@@ -131,7 +133,7 @@ func (db *DB) GetAppBySlug(slug string) (*App, error) {
 
 // ListAppsByOwner returns all apps owned by a user.
 func (db *DB) ListAppsByOwner(ownerID string) ([]App, error) {
-	rows, err := db.Query(`SELECT id, owner_id, name, slug, description, icon, homepage,
+	rows, err := db.Query(`SELECT id, owner_id, name, slug, description, icon, icon_url, homepage,
 		tools, events, scopes, setup_url, redirect_url, client_secret, listed, status,
 		EXTRACT(EPOCH FROM created_at)::BIGINT, EXTRACT(EPOCH FROM updated_at)::BIGINT
 		FROM apps WHERE owner_id = $1 ORDER BY created_at DESC`, ownerID)
@@ -142,7 +144,7 @@ func (db *DB) ListAppsByOwner(ownerID string) ([]App, error) {
 	var apps []App
 	for rows.Next() {
 		var a App
-		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Name, &a.Slug, &a.Description, &a.Icon, &a.Homepage,
+		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Name, &a.Slug, &a.Description, &a.Icon, &a.IconURL, &a.Homepage,
 			&a.Tools, &a.Events, &a.Scopes, &a.SetupURL, &a.RedirectURL, &a.ClientSecret, &a.Listed, &a.Status,
 			&a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
@@ -154,7 +156,7 @@ func (db *DB) ListAppsByOwner(ownerID string) ([]App, error) {
 
 // ListListedApps returns all publicly listed apps.
 func (db *DB) ListListedApps() ([]App, error) {
-	rows, err := db.Query(`SELECT a.id, a.owner_id, a.name, a.slug, a.description, a.icon, a.homepage,
+	rows, err := db.Query(`SELECT a.id, a.owner_id, a.name, a.slug, a.description, a.icon, a.icon_url, a.homepage,
 		a.tools, a.events, a.scopes, a.setup_url, a.redirect_url, '', a.listed, a.status,
 		EXTRACT(EPOCH FROM a.created_at)::BIGINT, EXTRACT(EPOCH FROM a.updated_at)::BIGINT,
 		COALESCE(u.username, '')
@@ -167,7 +169,7 @@ func (db *DB) ListListedApps() ([]App, error) {
 	var apps []App
 	for rows.Next() {
 		var a App
-		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Name, &a.Slug, &a.Description, &a.Icon, &a.Homepage,
+		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Name, &a.Slug, &a.Description, &a.Icon, &a.IconURL, &a.Homepage,
 			&a.Tools, &a.Events, &a.Scopes, &a.SetupURL, &a.RedirectURL, &a.ClientSecret, &a.Listed, &a.Status,
 			&a.CreatedAt, &a.UpdatedAt, &a.OwnerName); err != nil {
 			return nil, err
@@ -179,7 +181,7 @@ func (db *DB) ListListedApps() ([]App, error) {
 
 // ListAllApps returns all apps (admin only).
 func (db *DB) ListAllApps() ([]App, error) {
-	rows, err := db.Query(`SELECT a.id, a.owner_id, a.name, a.slug, a.description, a.icon, a.homepage,
+	rows, err := db.Query(`SELECT a.id, a.owner_id, a.name, a.slug, a.description, a.icon, a.icon_url, a.homepage,
 		a.tools, a.events, a.scopes, a.setup_url, a.redirect_url, '', a.listed, a.status,
 		EXTRACT(EPOCH FROM a.created_at)::BIGINT, EXTRACT(EPOCH FROM a.updated_at)::BIGINT,
 		COALESCE(u.username, '')
@@ -192,7 +194,7 @@ func (db *DB) ListAllApps() ([]App, error) {
 	var apps []App
 	for rows.Next() {
 		var a App
-		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Name, &a.Slug, &a.Description, &a.Icon, &a.Homepage,
+		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Name, &a.Slug, &a.Description, &a.Icon, &a.IconURL, &a.Homepage,
 			&a.Tools, &a.Events, &a.Scopes, &a.SetupURL, &a.RedirectURL, &a.ClientSecret, &a.Listed, &a.Status,
 			&a.CreatedAt, &a.UpdatedAt, &a.OwnerName); err != nil {
 			return nil, err
@@ -209,10 +211,10 @@ func (db *DB) SetAppListed(id string, listed bool) error {
 }
 
 // UpdateApp updates an app's fields.
-func (db *DB) UpdateApp(id string, name, description, icon, homepage, setupURL, redirectURL string, tools, events, scopes json.RawMessage) error {
-	_, err := db.Exec(`UPDATE apps SET name=$1, description=$2, icon=$3, homepage=$4,
-		tools=$5, events=$6, scopes=$7, setup_url=$8, redirect_url=$9, updated_at=NOW() WHERE id=$10`,
-		name, description, icon, homepage, tools, events, scopes, setupURL, redirectURL, id)
+func (db *DB) UpdateApp(id string, name, description, icon, iconURL, homepage, setupURL, redirectURL string, tools, events, scopes json.RawMessage) error {
+	_, err := db.Exec(`UPDATE apps SET name=$1, description=$2, icon=$3, icon_url=$4, homepage=$5,
+		tools=$6, events=$7, scopes=$8, setup_url=$9, redirect_url=$10, updated_at=NOW() WHERE id=$11`,
+		name, description, icon, iconURL, homepage, tools, events, scopes, setupURL, redirectURL, id)
 	return err
 }
 
@@ -247,13 +249,13 @@ func (db *DB) GetInstallation(id string) (*AppInstallation, error) {
 	err := db.QueryRow(`SELECT i.id, i.app_id, i.bot_id, i.app_token, i.signing_secret,
 		i.request_url, i.url_verified, i.handle, i.config, i.enabled,
 		EXTRACT(EPOCH FROM i.created_at)::BIGINT, EXTRACT(EPOCH FROM i.updated_at)::BIGINT,
-		COALESCE(a.name,''), COALESCE(a.slug,''), COALESCE(a.icon,'')
+		COALESCE(a.name,''), COALESCE(a.slug,''), COALESCE(a.icon,''), COALESCE(a.icon_url,'')
 		FROM app_installations i JOIN apps a ON a.id = i.app_id
 		WHERE i.id = $1`, id).Scan(
 		&i.ID, &i.AppID, &i.BotID, &i.AppToken, &i.SigningSecret,
 		&i.RequestURL, &i.URLVerified, &i.Handle, &i.Config, &i.Enabled,
 		&i.CreatedAt, &i.UpdatedAt,
-		&i.AppName, &i.AppSlug, &i.AppIcon)
+		&i.AppName, &i.AppSlug, &i.AppIcon, &i.AppIconURL)
 	if err != nil {
 		return nil, err
 	}
@@ -266,13 +268,13 @@ func (db *DB) GetInstallationByToken(token string) (*AppInstallation, error) {
 	err := db.QueryRow(`SELECT i.id, i.app_id, i.bot_id, i.app_token, i.signing_secret,
 		i.request_url, i.url_verified, i.handle, i.config, i.enabled,
 		EXTRACT(EPOCH FROM i.created_at)::BIGINT, EXTRACT(EPOCH FROM i.updated_at)::BIGINT,
-		COALESCE(a.name,''), COALESCE(a.slug,''), COALESCE(a.icon,'')
+		COALESCE(a.name,''), COALESCE(a.slug,''), COALESCE(a.icon,''), COALESCE(a.icon_url,'')
 		FROM app_installations i JOIN apps a ON a.id = i.app_id
 		WHERE i.app_token = $1`, token).Scan(
 		&i.ID, &i.AppID, &i.BotID, &i.AppToken, &i.SigningSecret,
 		&i.RequestURL, &i.URLVerified, &i.Handle, &i.Config, &i.Enabled,
 		&i.CreatedAt, &i.UpdatedAt,
-		&i.AppName, &i.AppSlug, &i.AppIcon)
+		&i.AppName, &i.AppSlug, &i.AppIcon, &i.AppIconURL)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +295,7 @@ func (db *DB) listInstallations(where string, arg any) ([]AppInstallation, error
 	rows, err := db.Query(fmt.Sprintf(`SELECT i.id, i.app_id, i.bot_id, i.app_token, i.signing_secret,
 		i.request_url, i.url_verified, i.handle, i.config, i.enabled,
 		EXTRACT(EPOCH FROM i.created_at)::BIGINT, EXTRACT(EPOCH FROM i.updated_at)::BIGINT,
-		COALESCE(a.name,''), COALESCE(a.slug,''), COALESCE(a.icon,'')
+		COALESCE(a.name,''), COALESCE(a.slug,''), COALESCE(a.icon,''), COALESCE(a.icon_url,'')
 		FROM app_installations i JOIN apps a ON a.id = i.app_id
 		WHERE %s ORDER BY i.created_at DESC`, where), arg)
 	if err != nil {
@@ -306,7 +308,7 @@ func (db *DB) listInstallations(where string, arg any) ([]AppInstallation, error
 		if err := rows.Scan(&i.ID, &i.AppID, &i.BotID, &i.AppToken, &i.SigningSecret,
 			&i.RequestURL, &i.URLVerified, &i.Handle, &i.Config, &i.Enabled,
 			&i.CreatedAt, &i.UpdatedAt,
-			&i.AppName, &i.AppSlug, &i.AppIcon); err != nil {
+			&i.AppName, &i.AppSlug, &i.AppIcon, &i.AppIconURL); err != nil {
 			return nil, err
 		}
 		list = append(list, i)
@@ -340,13 +342,13 @@ func (db *DB) GetInstallationByHandle(botID, handle string) (*AppInstallation, e
 	err := db.QueryRow(`SELECT i.id, i.app_id, i.bot_id, i.app_token, i.signing_secret,
 		i.request_url, i.url_verified, i.handle, i.config, i.enabled,
 		EXTRACT(EPOCH FROM i.created_at)::BIGINT, EXTRACT(EPOCH FROM i.updated_at)::BIGINT,
-		COALESCE(a.name,''), COALESCE(a.slug,''), COALESCE(a.icon,'')
+		COALESCE(a.name,''), COALESCE(a.slug,''), COALESCE(a.icon,''), COALESCE(a.icon_url,'')
 		FROM app_installations i JOIN apps a ON a.id = i.app_id
 		WHERE i.bot_id = $1 AND i.handle = $2`, botID, handle).Scan(
 		&i.ID, &i.AppID, &i.BotID, &i.AppToken, &i.SigningSecret,
 		&i.RequestURL, &i.URLVerified, &i.Handle, &i.Config, &i.Enabled,
 		&i.CreatedAt, &i.UpdatedAt,
-		&i.AppName, &i.AppSlug, &i.AppIcon)
+		&i.AppName, &i.AppSlug, &i.AppIcon, &i.AppIconURL)
 	if err != nil {
 		return nil, err
 	}

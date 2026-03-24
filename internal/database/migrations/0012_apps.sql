@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS apps (
     slug            TEXT NOT NULL UNIQUE,
     description     TEXT NOT NULL DEFAULT '',
     icon            TEXT NOT NULL DEFAULT '',
+    icon_url        TEXT NOT NULL DEFAULT '',
     homepage        TEXT NOT NULL DEFAULT '',
     tools           JSONB NOT NULL DEFAULT '[]',
     events          JSONB NOT NULL DEFAULT '[]',

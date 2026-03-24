@@ -7,10 +7,10 @@ import { Badge } from "../components/ui/badge";
 import { Plus, Blocks, X, Download } from "lucide-react";
 import { api } from "../lib/api";
 
-function AppIcon({ icon, size = "w-8 h-8" }: { icon?: string; size?: string }) {
-  if (!icon) return <div className={`${size} rounded-lg bg-secondary flex items-center justify-center`}><Blocks className="w-4 h-4 text-muted-foreground" /></div>;
-  if (icon.startsWith("http")) return <img src={icon} alt="" className={`${size} rounded-lg object-cover`} />;
-  return <div className={`${size} rounded-lg bg-secondary flex items-center justify-center text-lg`}>{icon}</div>;
+function AppIcon({ icon, iconUrl, size = "w-8 h-8" }: { icon?: string; iconUrl?: string; size?: string }) {
+  if (iconUrl) return <img src={iconUrl} alt="" className={`${size} rounded-lg object-cover`} />;
+  if (icon) return <div className={`${size} rounded-lg bg-secondary flex items-center justify-center text-lg`}>{icon}</div>;
+  return <div className={`${size} rounded-lg bg-secondary flex items-center justify-center`}><Blocks className="w-4 h-4 text-muted-foreground" /></div>;
 }
 
 function slugify(name: string): string {
@@ -77,17 +77,7 @@ function MarketplaceTab() {
           <Card key={app.id} className="space-y-2">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
-                {app.icon ? (
-                  <img
-                    src={app.icon}
-                    alt=""
-                    className="w-10 h-10 rounded-lg object-cover shrink-0"
-                  />
-                ) : (
-                  <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center shrink-0">
-                    <Blocks className="w-5 h-5 text-muted-foreground" />
-                  </div>
-                )}
+                <AppIcon icon={app.icon} iconUrl={app.icon_url} size="w-10 h-10" />
                 <div className="min-w-0">
                   <p className="font-medium text-sm">{app.name}</p>
                   {app.description && (
@@ -207,7 +197,7 @@ function InstallModal({ app, onClose }: { app: any; onClose: () => void }) {
           <>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <AppIcon icon={app.icon} />
+                <AppIcon icon={app.icon} iconUrl={app.icon_url} />
                 <div>
                   <p className="text-sm font-medium">安装 {app.name}</p>
                   {app.description && (
@@ -377,13 +367,7 @@ function MyAppsTab() {
           onClick={() => navigate(`/dashboard/apps/${app.id}`)}
         >
           <div className="flex items-center gap-3">
-            {app.icon ? (
-              <img src={app.icon} alt="" className="w-8 h-8 rounded-lg object-cover" />
-            ) : (
-              <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center">
-                <Blocks className="w-4 h-4 text-muted-foreground" />
-              </div>
-            )}
+            <AppIcon icon={app.icon} iconUrl={app.icon_url} />
             <div>
               <p className="font-medium text-sm">{app.name}</p>
               <p className="text-xs text-muted-foreground font-mono mt-0.5">{app.slug}</p>

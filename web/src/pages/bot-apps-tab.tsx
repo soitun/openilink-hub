@@ -98,7 +98,11 @@ export function BotAppsTab({ botId }: { botId: string }) {
                 onClick={() => setExpanded(expanded === inst.id ? null : inst.id)}
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  {inst.app_icon && <span className="text-lg">{inst.app_icon}</span>}
+                  {inst.app_icon_url ? (
+                    <img src={inst.app_icon_url} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" />
+                  ) : inst.app_icon ? (
+                    <span className="text-lg">{inst.app_icon}</span>
+                  ) : null}
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{inst.app_name}</span>
