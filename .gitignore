@@ -1,9 +1,13 @@
 openilink-hub
+AGENTS.md
 internal/web/dist/*
 !internal/web/dist/.gitkeep
 *.db
 *.db-wal
 *.db-shm
+.env
+.env.*
+*.log
 .idea/
 .vscode/
 *.swp

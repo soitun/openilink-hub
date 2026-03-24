@@ -5,6 +5,11 @@ services:
       POSTGRES_USER: openilink
       POSTGRES_PASSWORD: openilink
       POSTGRES_DB: openilink
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openilink -d openilink"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     ports:
       - "15432:5432"
     volumes:
@@ -24,6 +29,7 @@ services:
 
   hub:
     build: .
+    restart: on-failure
     ports:
       - "9800:9800"
     environment:
@@ -40,8 +46,10 @@ services:
       # LINUXDO_CLIENT_ID:
       # LINUXDO_CLIENT_SECRET:
     depends_on:
-      - postgres
-      - minio
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
 
 volumes:
   pgdata:
