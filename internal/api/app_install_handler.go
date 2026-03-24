@@ -257,17 +257,24 @@ func (s *Server) handleVerifyURL(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	bodyStr := strings.TrimSpace(string(body))
+
 	if resp.StatusCode != http.StatusOK {
-		slog.Error("verify-url: remote error", "inst", inst.ID, "url", inst.RequestURL, "status", resp.StatusCode)
-		jsonError(w, "验证失败：远端返回 HTTP "+strconv.Itoa(resp.StatusCode), http.StatusUnprocessableEntity)
+		slog.Error("verify-url: remote error", "inst", inst.ID, "url", inst.RequestURL, "status", resp.StatusCode, "body", bodyStr)
+		msg := "验证失败：远端返回 HTTP " + strconv.Itoa(resp.StatusCode)
+		if bodyStr != "" {
+			msg += " — " + bodyStr
+		}
+		jsonError(w, msg, http.StatusUnprocessableEntity)
 		return
 	}
 
 	var result struct {
 		Challenge string `json:"challenge"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		slog.Error("verify-url: invalid response", "inst", inst.ID, "url", inst.RequestURL, "err", err)
+	if err := json.Unmarshal(body, &result); err != nil {
+		slog.Error("verify-url: invalid response", "inst", inst.ID, "url", inst.RequestURL, "body", bodyStr, "err", err)
 		jsonError(w, "验证失败：远端返回了无效的响应", http.StatusUnprocessableEntity)
 		return
 	}
