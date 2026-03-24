@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -50,23 +51,33 @@ func (s *Server) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	slog.Info("install: creating", "app", app.Slug, "bot", req.BotID, "handle", handle)
+
 	inst, err := s.DB.InstallApp(app.ID, req.BotID)
 	if err != nil {
+		slog.Error("install: db insert failed", "app", app.ID, "bot", req.BotID, "err", err)
 		jsonError(w, "install failed", http.StatusInternalServerError)
 		return
 	}
+	slog.Info("install: created", "inst", inst.ID, "app_token", inst.AppToken[:8]+"...")
 
 	// Set handle
-	_ = s.DB.UpdateInstallation(inst.ID, inst.RequestURL, handle, inst.Config, inst.Enabled)
+	if err := s.DB.UpdateInstallation(inst.ID, inst.RequestURL, handle, inst.Config, inst.Enabled); err != nil {
+		slog.Error("install: set handle failed", "inst", inst.ID, "err", err)
+	}
 	inst.Handle = handle
 
 	// Auto-notify App via redirect_url (for apps without setup_url)
 	if app.SetupURL == "" && app.RedirectURL != "" {
+		slog.Info("install: notifying app", "inst", inst.ID, "redirect_url", app.RedirectURL)
 		s.notifyAppInstalled(app, inst)
 		// Re-read installation to get updated request_url
 		if updated, err := s.DB.GetInstallation(inst.ID); err == nil {
 			inst = updated
+			slog.Info("install: after notify", "inst", inst.ID, "request_url", inst.RequestURL, "url_verified", inst.URLVerified)
 		}
+	} else {
+		slog.Info("install: no redirect_url, skipping auto-notify", "inst", inst.ID, "setup_url", app.SetupURL, "redirect_url", app.RedirectURL)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -377,23 +388,38 @@ func (s *Server) notifyAppInstalled(app *database.App, inst *database.AppInstall
 		"hub_url":         s.Config.RPOrigin,
 	})
 
+	slog.Info("notify: POST to redirect_url", "inst", inst.ID, "url", app.RedirectURL)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post(app.RedirectURL, "application/json", bytes.NewReader(payload))
 	if err != nil {
-		slog.Error("notify app installed failed", "app", app.ID, "err", err)
+		slog.Error("notify: request failed", "inst", inst.ID, "url", app.RedirectURL, "err", err)
 		return
 	}
 	defer resp.Body.Close()
 
-	var result struct {
-		RequestURL string `json:"request_url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || result.RequestURL == "" {
+	body, _ := io.ReadAll(resp.Body)
+	slog.Info("notify: response", "inst", inst.ID, "status", resp.StatusCode, "body", string(body))
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("notify: non-200 response", "inst", inst.ID, "status", resp.StatusCode)
 		return
 	}
 
+	var result struct {
+		RequestURL string `json:"request_url"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil || result.RequestURL == "" {
+		slog.Error("notify: no request_url in response", "inst", inst.ID, "body", string(body))
+		return
+	}
+
+	slog.Info("notify: got request_url", "inst", inst.ID, "request_url", result.RequestURL)
+
 	// Auto-set request_url and verify
-	_ = s.DB.UpdateInstallation(inst.ID, result.RequestURL, inst.Handle, inst.Config, inst.Enabled)
+	if err := s.DB.UpdateInstallation(inst.ID, result.RequestURL, inst.Handle, inst.Config, inst.Enabled); err != nil {
+		slog.Error("notify: update request_url failed", "inst", inst.ID, "err", err)
+		return
+	}
 	s.autoVerifyURL(inst.ID, result.RequestURL)
 }
 
@@ -409,22 +435,34 @@ func (s *Server) autoVerifyURL(instID, requestURL string) {
 		"challenge": challenge,
 	})
 
-	client := &http.Client{Timeout: 3 * time.Second}
+	slog.Info("auto-verify: POST challenge", "inst", instID, "url", requestURL)
+	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Post(requestURL, "application/json", bytes.NewReader(payload))
 	if err != nil {
-		slog.Error("auto verify url failed", "inst", instID, "err", err)
+		slog.Error("auto-verify: request failed", "inst", instID, "url", requestURL, "err", err)
 		return
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+	slog.Info("auto-verify: response", "inst", instID, "status", resp.StatusCode, "body", string(body))
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("auto-verify: non-200", "inst", instID, "status", resp.StatusCode)
+		return
+	}
+
 	var result struct {
 		Challenge string `json:"challenge"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
+		slog.Error("auto-verify: invalid response", "inst", instID, "err", err)
 		return
 	}
 	if result.Challenge == challenge {
 		_ = s.DB.SetInstallationURLVerified(instID, true)
-		slog.Info("auto verify url success", "inst", instID)
+		slog.Info("auto-verify: success", "inst", instID)
+	} else {
+		slog.Error("auto-verify: challenge mismatch", "inst", instID, "expected", challenge, "got", result.Challenge)
 	}
 }
