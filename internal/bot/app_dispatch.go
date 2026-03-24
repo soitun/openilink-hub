@@ -2,11 +2,13 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"time"
 
 	appdelivery "github.com/openilink/openilink-hub/internal/app"
+	"github.com/openilink/openilink-hub/internal/database"
 	"github.com/openilink/openilink-hub/internal/provider"
 )
 
@@ -148,7 +150,7 @@ func (m *Manager) tryDeliverCommand(inst *Instance, msg provider.InboundMessage,
 	return true
 }
 
-// sendAppReply sends a text reply from an App via the bot.
+// sendAppReply sends a text reply from an App via the bot and stores it as outbound.
 func (m *Manager) sendAppReply(inst *Instance, to, text string) {
 	if text == "" {
 		return
@@ -156,15 +158,27 @@ func (m *Manager) sendAppReply(inst *Instance, to, text string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	contextToken := m.db.GetLatestContextToken(inst.DBID)
 	clientID, err := inst.Provider.Send(ctx, provider.OutboundMessage{
-		Recipient: to,
-		Text:      text,
+		Recipient:    to,
+		Text:         text,
+		ContextToken: contextToken,
 	})
 	if err != nil {
 		slog.Error("app reply send failed", "bot", inst.DBID, "to", to, "err", err)
 		return
 	}
 	slog.Info("app reply sent", "bot", inst.DBID, "to", to, "client_id", clientID)
+
+	// Save outbound message to DB
+	itemList, _ := json.Marshal([]map[string]any{{"type": "text", "text": text}})
+	m.db.SaveMessage(&database.Message{
+		BotID:       inst.DBID,
+		Direction:   "outbound",
+		ToUserID:    to,
+		MessageType: 2,
+		ItemList:    itemList,
+	})
 }
 
 func groupInfo(msg provider.InboundMessage) any {
