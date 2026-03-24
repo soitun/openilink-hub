@@ -20,36 +20,79 @@ Two communication directions:
 In the OpeniLink Hub dashboard → Apps → Create App:
 - **Name**: Display name (e.g. "GitHub Integration")
 - **Slug**: Unique identifier (e.g. `github`, lowercase alphanumeric + hyphens)
-- **Commands**: Slash commands your App handles (see below)
+- **Tools**: Functions your App exposes (see below)
 - **Events**: Event types your App subscribes to (e.g. `message.text`)
 - **Scopes**: Permissions your App needs (e.g. `messages.send`)
 
-#### Commands
+#### Tools
 
-An App can register multiple slash commands. Each command has:
+Tools define your App's capabilities. Each tool is a function that can be:
+- Triggered by users via slash commands (e.g. `/pr`)
+- Called by the platform's AI Agent via structured tool calling
 
 | Field | Required | Description |
 |---|---|---|
-| `name` | Yes | Command name with `/` prefix (e.g. `/github`) |
-| `description` | No | What this command does |
-| `usage` | No | Usage hint (e.g. `/github subscribe owner/repo`) |
+| `name` | Yes | Tool identifier (e.g. `list_prs`) |
+| `description` | Yes | What this tool does (used by AI Agent for tool selection) |
+| `command` | No | Slash command trigger without `/` prefix (e.g. `pr`) |
+| `parameters` | No | JSON Schema defining structured parameters |
 
-Example — a GitHub App with multiple commands:
+Example — a GitHub App with tools:
 
 ```json
 [
-  {"name": "/github", "description": "General GitHub commands", "usage": "/github help"},
-  {"name": "/pr", "description": "List open PRs", "usage": "/pr [owner/repo]"},
-  {"name": "/issue", "description": "Create or list issues", "usage": "/issue create <title>"},
-  {"name": "/deploy", "description": "Trigger deployment", "usage": "/deploy <env> [branch]"}
+  {
+    "name": "list_prs",
+    "description": "List pull requests for a repository",
+    "command": "pr",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "repo": {"type": "string", "description": "Repository (owner/repo)"},
+        "state": {"type": "string", "enum": ["open", "closed", "all"], "description": "Filter state"}
+      },
+      "required": ["repo"]
+    }
+  },
+  {
+    "name": "create_issue",
+    "description": "Create a new GitHub issue",
+    "command": "issue",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "repo": {"type": "string", "description": "Repository (owner/repo)"},
+        "title": {"type": "string", "description": "Issue title"},
+        "body": {"type": "string", "description": "Issue body"}
+      },
+      "required": ["repo", "title"]
+    }
+  },
+  {
+    "name": "ping",
+    "description": "Check if the service is alive",
+    "command": "ping"
+  }
 ]
 ```
 
-Users trigger commands by sending `/commandname args` in WeChat. The platform matches the first word after `/` against registered commands and routes to the corresponding App.
+##### How tools are triggered
 
-If two Apps register the same command on the same Bot, both receive the event.
+**By user (slash command):** User sends `/pr openilink/openilink-hub` → platform delivers:
+```json
+{"command": "/pr", "text": "openilink/openilink-hub", "args": null}
+```
 
-Commands can also be triggered via `@handle /command args` if a handle is configured on the installation.
+**By AI Agent (tool calling):** AI decides to call `list_prs` → platform delivers:
+```json
+{"command": "/pr", "text": "", "args": {"repo": "openilink/openilink-hub", "state": "open"}}
+```
+
+**Via @handle:** User sends `@github /pr args` or `@github list my PRs` (AI Agent interprets).
+
+Your App should handle both: check `args` first (structured), fall back to parsing `text` (free-form).
+
+Tools without a `command` field are only callable by the AI Agent, not by users directly.
 
 ### 2. Install to a Bot
 
@@ -137,10 +180,11 @@ Group messages include `group`:
 }
 ```
 
-### Command Events
+### Tool / Command Events
 
-When a user sends `/command args` in WeChat, the platform parses the command name and routes it to Apps that registered it. Each App receives the same event independently.
+When a user sends `/command args` or the AI Agent calls a tool, the platform routes to the App.
 
+**User-triggered (free-form text):**
 ```json
 {
   "v": 1,
@@ -153,31 +197,40 @@ When a user sends `/command args` in WeChat, the platform parses the command nam
     "id": "evt_xxx",
     "timestamp": 1711234567,
     "data": {
-      "command": "/github",
-      "text": "list PRs",
-      "sender": {
-        "id": "wxid_abc",
-        "name": "Zhang San"
-      },
+      "command": "/pr",
+      "text": "openilink/openilink-hub open",
+      "args": null,
+      "sender": {"id": "wxid_abc", "name": "Zhang San"},
       "group": null
     }
   }
 }
 ```
 
-The `command` field contains the matched command name (e.g. `/github`), and `text` contains everything after it.
+**AI Agent-triggered (structured args):**
+```json
+{
+  "v": 1,
+  "type": "command",
+  "trace_id": "tr_abc123",
+  "installation_id": "inst_xxx",
+  "bot": {"id": "bot_xxx"},
+  "event": {
+    "type": "command",
+    "id": "evt_xxx",
+    "timestamp": 1711234567,
+    "data": {
+      "command": "/pr",
+      "text": "",
+      "args": {"repo": "openilink/openilink-hub", "state": "open"},
+      "sender": {"id": "system", "name": "AI Agent"},
+      "group": null
+    }
+  }
+}
+```
 
-Examples of how user input maps to the payload:
-
-| User sends | `command` | `text` |
-|---|---|---|
-| `/github list PRs` | `/github` | `list PRs` |
-| `/pr my-repo` | `/pr` | `my-repo` |
-| `/deploy prod main` | `/deploy` | `prod main` |
-| `/issue create fix bug` | `/issue` | `create fix bug` |
-| `@myapp /github list PRs` | `/github` | `list PRs` |
-
-Your App should dispatch on the `command` field to handle different commands:
+Your App should handle both modes:
 
 ```python
 @app.route("/webhook", methods=["POST"])
@@ -185,16 +238,19 @@ def handle():
     data = request.json
     if data["type"] == "command":
         cmd = data["event"]["data"]
-        if cmd["command"] == "/github":
-            return handle_github(cmd["text"], cmd["sender"])
-        elif cmd["command"] == "/pr":
-            return handle_pr(cmd["text"], cmd["sender"])
-        elif cmd["command"] == "/deploy":
-            return handle_deploy(cmd["text"], cmd["sender"])
+        args = cmd.get("args") or {}  # structured (from AI Agent)
+        text = cmd.get("text", "")     # free-form (from user)
+
+        if cmd["command"] == "/pr":
+            repo = args.get("repo") or text.split()[0] if text else None
+            state = args.get("state", "open")
+            return list_prs(repo, state)
+        elif cmd["command"] == "/issue":
+            repo = args.get("repo") or text.split()[0] if text else None
+            title = args.get("title") or " ".join(text.split()[1:])
+            return create_issue(repo, title, args.get("body"))
     return jsonify({"ok": True})
 ```
-
-Commands can also be triggered via `@handle args` if a handle is configured on the installation.
 
 ### Synchronous Reply
 
