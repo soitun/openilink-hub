@@ -87,14 +87,6 @@ jobs:
           path: darwin-archives/
           merge-multiple: true
 
-      # Commit downloaded artifacts so GoReleaser sees clean git state
-      - name: Commit artifacts for clean git state
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f internal/web/dist/ darwin-archives/
-          git commit -m "ci: add build artifacts" --no-verify
-
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -119,7 +111,7 @@ jobs:
         with:
           version: "~> v2"
           args: >-
-            release
+            release --skip=validate
             ${{ github.event_name == 'workflow_dispatch' && '--snapshot --clean' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
