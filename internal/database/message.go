@@ -57,29 +57,50 @@ func scanMessage(scanner interface{ Scan(...any) error }) (*Message, error) {
 	return m, nil
 }
 
-func (db *DB) SaveMessage(m *Message) (int64, error) {
+// SaveResult holds the result of a SaveMessage upsert.
+type SaveResult struct {
+	ID       int64
+	Inserted bool // true = new row, false = updated existing (duplicate message_id)
+}
+
+func (db *DB) SaveMessage(m *Message) (SaveResult, error) {
 	if m.ItemList == nil {
 		m.ItemList = json.RawMessage(`[]`)
 	}
 	if m.MediaKeys == nil {
 		m.MediaKeys = json.RawMessage(`{}`)
 	}
-	var id int64
+	// Inbound messages start unprocessed (processed_at = NULL);
+	// outbound messages are immediately considered processed.
+	processedExpr := "NULL"
+	if m.Direction == "outbound" {
+		processedExpr = "NOW()"
+	}
+
+	var r SaveResult
+	// xmax = 0 means the row was freshly inserted; non-zero means it was updated
+	// via ON CONFLICT (PostgreSQL internal: xmax holds the updating transaction ID).
 	err := db.QueryRow(`
 		INSERT INTO messages (bot_id, channel_id, direction,
 			seq, message_id, from_user_id, to_user_id, client_id,
 			create_time_ms, update_time_ms, delete_time_ms,
 			session_id, group_id, message_type, message_state, item_list, context_token,
-			media_status, media_keys, raw)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-		RETURNING id`,
+			media_status, media_keys, raw, processed_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, `+processedExpr+`)
+		ON CONFLICT (bot_id, message_id) WHERE message_id IS NOT NULL DO UPDATE SET
+			message_state  = EXCLUDED.message_state,
+			item_list      = EXCLUDED.item_list,
+			update_time_ms = EXCLUDED.update_time_ms,
+			context_token  = EXCLUDED.context_token,
+			raw            = EXCLUDED.raw
+		RETURNING id, (xmax = 0)`,
 		m.BotID, m.ChannelID, m.Direction,
 		m.Seq, m.MessageID, m.FromUserID, m.ToUserID, m.ClientID,
 		m.CreateTimeMs, m.UpdateTimeMs, m.DeleteTimeMs,
 		m.SessionID, m.GroupID, m.MessageType, m.MessageState, m.ItemList, m.ContextToken,
 		m.MediaStatus, m.MediaKeys, m.Raw,
-	).Scan(&id)
-	return id, err
+	).Scan(&r.ID, &r.Inserted)
+	return r, err
 }
 
 func (db *DB) GetMessage(id int64) (*Message, error) {
@@ -186,6 +207,25 @@ func (db *DB) UpdateMediaPayloads(botID, eqp string, newPayload json.RawMessage)
 		WHERE bot_id = $3 AND media_status = 'downloading'`,
 		status, keys, botID)
 	return err
+}
+
+// MarkProcessed sets processed_at = NOW() for a message.
+func (db *DB) MarkProcessed(id int64) error {
+	_, err := db.Exec("UPDATE messages SET processed_at = NOW() WHERE id = $1", id)
+	return err
+}
+
+// GetUnprocessedMessages returns inbound messages that were never fully processed
+// (processed_at IS NULL), typically due to a crash or restart. Limited to recent
+// messages (last 24h) to avoid replaying ancient data.
+func (db *DB) GetUnprocessedMessages(botID string, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	return scanMessages(db,
+		"SELECT "+msgSelectCols+" FROM messages WHERE bot_id = $1 AND direction = 'inbound' AND processed_at IS NULL AND created_at > NOW() - INTERVAL '1 day' ORDER BY id ASC LIMIT $2",
+		botID, limit,
+	)
 }
 
 func (db *DB) PruneMessages(maxAgeDays int) (int64, error) {

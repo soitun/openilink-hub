@@ -126,6 +126,10 @@ func (m *Manager) StartBot(ctx context.Context, bot *database.Bot) error {
 
 	m.instances[bot.ID] = inst
 	slog.Info("bot started", "bot", bot.ID, "provider", bot.Provider)
+
+	// Recover any messages that were stored but not fully processed (e.g. crash).
+	go m.recoverUnprocessed(inst)
+
 	return nil
 }
 
@@ -275,9 +279,12 @@ func (m *Manager) onStatusChange(inst *Instance, status string) {
 }
 
 // onInbound processes an inbound message in three decoupled phases:
-//  1. Store — save message to DB immediately (+ start async media download)
+//  1. Store — save/upsert message to DB immediately (+ start async media download)
 //  2. Route — match channels by handle/filter
 //  3. Deliver — fan out to matched channels' sinks
+//
+// Duplicate messages (same message_id seen again) only upsert the DB row and
+// push the update via WebSocket — they do NOT re-trigger sink/app delivery.
 func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -286,6 +293,17 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 	}()
 
 	parsed := m.parseMessage(msg)
+
+	// Phase 1: Store/upsert message (independent of channels)
+	result := m.storeMessage(inst, msg, parsed)
+
+	if !result.Inserted {
+		// Duplicate message_id: DB row was updated (not inserted). Broadcast
+		// the state change to WebSocket clients but skip full delivery.
+		m.broadcastStateUpdate(inst, msg, parsed, result.ID)
+		return
+	}
+	msgID := result.ID
 
 	// Create OTel-style tracer for this message
 	tracer := database.NewTracer(m.db, inst.DBID)
@@ -296,8 +314,6 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 		"message.id":      msg.ExternalID,
 	})
 
-	// Phase 1: Store message (independent of channels)
-	msgID := m.storeMessage(inst, msg, parsed)
 	storeSpan := tracer.StartChild(rootSpan, "store", database.SpanKindInternal, map[string]any{
 		"message.db_id": msgID,
 	})
@@ -323,11 +339,22 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 		matchSpan.End()
 	}
 
+	// Show typing indicator while delivering to sinks and apps.
+	typingDone := m.startTyping(inst, msg)
+
 	// Phase 3: Deliver to sinks
 	m.deliverToChannels(inst, msg, parsed, matched, msgID)
 
 	// Phase 4: Deliver to Apps (with trace)
 	m.deliverToApps(inst, msg, parsed, tracer, rootSpan)
+
+	// Stop typing indicator
+	typingDone()
+
+	// Phase 5: Mark as fully processed
+	if err := m.db.MarkProcessed(msgID); err != nil {
+		slog.Error("mark processed failed", "bot", inst.DBID, "msg", msgID, "err", err)
+	}
 
 	// End root span and flush all spans to DB
 	rootSpan.End()
@@ -417,14 +444,136 @@ func (m *Manager) buildDBMessage(botDBID string, channelID *string, msg provider
 	}
 }
 
-// storeMessage saves the message to DB without any channel association.
-func (m *Manager) storeMessage(inst *Instance, msg provider.InboundMessage, p parsedMessage) int64 {
-	if err := m.db.IncrBotMsgCount(inst.DBID); err != nil {
-		slog.Error("incr msg count failed", "bot", inst.DBID, "err", err)
-	}
+// storeMessage saves/upserts the message to DB without any channel association.
+// Returns the SaveResult indicating whether it was a new insert or a duplicate update.
+func (m *Manager) storeMessage(inst *Instance, msg provider.InboundMessage, p parsedMessage) database.SaveResult {
 	dbMsg := m.buildDBMessage(inst.DBID, nil, msg, p)
-	seqID, _ := m.db.SaveMessage(dbMsg)
-	return seqID
+	result, _ := m.db.SaveMessage(dbMsg)
+	if result.Inserted {
+		if err := m.db.IncrBotMsgCount(inst.DBID); err != nil {
+			slog.Error("incr msg count failed", "bot", inst.DBID, "err", err)
+		}
+	}
+	return result
+}
+
+// broadcastStateUpdate pushes a message state update to all connected WebSocket
+// clients for the bot (via relay hub broadcast).
+func (m *Manager) broadcastStateUpdate(inst *Instance, msg provider.InboundMessage, p parsedMessage, msgID int64) {
+	env := relay.NewEnvelope("message", relay.MessageData{
+		SeqID: msgID, ExternalID: msg.ExternalID,
+		Sender: msg.Sender, Recipient: msg.Recipient, GroupID: msg.GroupID,
+		Timestamp: msg.Timestamp, MessageState: msg.MessageState,
+		Items: p.relayItems, ContextToken: msg.ContextToken, SessionID: msg.SessionID,
+	})
+	m.hub.Broadcast(inst.DBID, env)
+}
+
+// startTyping turns on the typing indicator for the message sender and returns
+// a function that cancels it. The indicator auto-expires after 25s as a safety net.
+// If the typing ticket cannot be obtained (e.g. no context token), the returned
+// function is a no-op.
+func (m *Manager) startTyping(inst *Instance, msg provider.InboundMessage) func() {
+	if msg.ContextToken == "" {
+		return func() {}
+	}
+
+	ctx := context.Background()
+	bcfg, err := inst.Provider.GetConfig(ctx, msg.Sender, msg.ContextToken)
+	if err != nil || bcfg == nil || bcfg.TypingTicket == "" {
+		return func() {}
+	}
+
+	ticket := bcfg.TypingTicket
+	inst.Provider.SendTyping(ctx, msg.Sender, ticket, true)
+
+	// Safety: auto-cancel after 25s in case delivery hangs.
+	timer := time.AfterFunc(25*time.Second, func() {
+		inst.Provider.SendTyping(context.Background(), msg.Sender, ticket, false)
+	})
+
+	return func() {
+		timer.Stop()
+		inst.Provider.SendTyping(context.Background(), msg.Sender, ticket, false)
+	}
+}
+
+// recoverUnprocessed re-delivers inbound messages that were stored but never
+// marked as processed (e.g. hub crashed mid-delivery). Called once per bot on startup.
+func (m *Manager) recoverUnprocessed(inst *Instance) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("recoverUnprocessed panic", "bot", inst.DBID, "err", r)
+		}
+	}()
+
+	msgs, err := m.db.GetUnprocessedMessages(inst.DBID, 100)
+	if err != nil {
+		slog.Error("load unprocessed messages failed", "bot", inst.DBID, "err", err)
+		return
+	}
+	if len(msgs) == 0 {
+		return
+	}
+	slog.Info("recovering unprocessed messages", "bot", inst.DBID, "count", len(msgs))
+
+	for i := range msgs {
+		msg := rebuildInbound(&msgs[i])
+		parsed := m.parseMessage(msg)
+
+		// Retry media download if it was still pending
+		if msgs[i].MediaStatus == "downloading" && parsed.hasMedia {
+			go m.downloadMedia(inst, msg, msgs[i].ID)
+		}
+
+		// Route + deliver
+		matched := m.matchChannels(inst.DBID, msg.Sender, parsed)
+		m.deliverToChannels(inst, msg, parsed, matched, msgs[i].ID)
+
+		tracer := database.NewTracer(m.db, inst.DBID)
+		rootSpan := tracer.Start("recover_message", database.SpanKindInternal, map[string]any{
+			"message.db_id": msgs[i].ID,
+			"message.id":    msg.ExternalID,
+		})
+		m.deliverToApps(inst, msg, parsed, tracer, rootSpan)
+		rootSpan.End()
+		tracer.Flush()
+
+		if err := m.db.MarkProcessed(msgs[i].ID); err != nil {
+			slog.Error("mark recovered msg processed failed", "id", msgs[i].ID, "err", err)
+		}
+	}
+	slog.Info("recovery complete", "bot", inst.DBID, "count", len(msgs))
+}
+
+// rebuildInbound reconstructs a provider.InboundMessage from a stored database.Message.
+func rebuildInbound(dbm *database.Message) provider.InboundMessage {
+	externalID := ""
+	if dbm.MessageID != nil {
+		externalID = fmt.Sprintf("%d", *dbm.MessageID)
+	}
+	var ts int64
+	if dbm.CreateTimeMs != nil {
+		ts = *dbm.CreateTimeMs
+	}
+
+	// Reconstruct provider items from stored item_list JSON
+	var items []provider.MessageItem
+	if len(dbm.ItemList) > 0 {
+		json.Unmarshal(dbm.ItemList, &items)
+	}
+
+	return provider.InboundMessage{
+		ExternalID:   externalID,
+		Sender:       dbm.FromUserID,
+		Recipient:    dbm.ToUserID,
+		GroupID:      dbm.GroupID,
+		Timestamp:    ts,
+		MessageState: dbm.MessageState,
+		Items:        items,
+		ContextToken: dbm.ContextToken,
+		SessionID:    dbm.SessionID,
+	}
 }
 
 // downloadMedia downloads media files async and updates stored messages.
