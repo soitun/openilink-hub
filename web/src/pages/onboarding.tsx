@@ -20,6 +20,7 @@ export function OnboardingPage() {
   const [bot, setBotInfo] = useState<any>(null);
   const [enableAI, setEnableAI] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadingConfig, setLoadingConfig] = useState(true);
 
   // Step 2
   const [apps, setApps] = useState<any[]>([]);
@@ -31,8 +32,12 @@ export function OnboardingPage() {
     if (!botId) { navigate("/dashboard/accounts", { replace: true }); return; }
     api.listBots().then(bots => {
       const found = (bots || []).find((b: any) => b.id === botId);
-      if (found) setBotInfo(found);
-    });
+      if (found) {
+        setBotInfo(found);
+        setEnableAI(found.ai_enabled ?? false);
+      }
+      setLoadingConfig(false);
+    }).catch(() => setLoadingConfig(false));
   }, [botId]);
 
   useEffect(() => {
@@ -50,7 +55,7 @@ export function OnboardingPage() {
   async function handleNextFromStep1() {
     setSaving(true);
     try {
-      await api.setDefaultChannelAI(botId!, enableAI);
+      await api.setBotAI(botId!, enableAI);
       setStep(2);
     } catch (e: any) {
       toast({ variant: "destructive", title: "保存失败", description: e.message || "请稍后重试" });

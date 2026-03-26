@@ -68,8 +68,8 @@ export const api = {
     request<import("./trace-utils").TraceSpan[]>(`/api/bots/${botId}/traces/${traceId}`),
   updateBot: (id: string, data: { name?: string; reminder_hours?: number }) =>
     request(`/api/bots/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  setDefaultChannelAI: (botId: string, enabled: boolean) =>
-    request(`/api/bots/${botId}/default-channel-ai`, {
+  setBotAI: (botId: string, enabled: boolean) =>
+    request(`/api/bots/${botId}/ai`, {
       method: "PUT",
       body: JSON.stringify({ enabled }),
     }),
