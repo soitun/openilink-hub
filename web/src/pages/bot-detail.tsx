@@ -16,7 +16,7 @@ import {
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { api } from "../lib/api";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -334,42 +334,36 @@ export function BotDetailPage() {
 
           {/* Builtin Apps */}
           {!marketplaceLoading && builtinApps.length > 0 ? (
-            <div className="space-y-3">
-              <h3 className="text-xs text-muted-foreground/60">内置应用</h3>
-              <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <h3 className="text-xs text-muted-foreground/60 px-1">内置应用</h3>
+              <div className="divide-y divide-border/50 rounded-xl border border-border/50 overflow-hidden">
                 {builtinApps.map((app: any) => (
-                  <Card
+                  <div
                     key={app.slug || app.id}
-                    className="group border-border/50 transition-all hover:border-primary/20 hover:shadow-md"
+                    className="group flex items-center gap-4 px-4 py-3.5 bg-card hover:bg-muted/40 transition-colors"
                   >
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center gap-3">
-                        <AppIcon icon={app.icon} iconUrl={app.icon_url} size="h-9 w-9" />
-                        <CardTitle className="text-sm font-semibold group-hover:text-primary transition-colors">
-                          {app.name}
-                        </CardTitle>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="pb-4 space-y-2">
-                      <p className="text-xs text-muted-foreground leading-relaxed">
+                    <AppIcon icon={app.icon} iconUrl={app.icon_url} size="h-9 w-9" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold leading-tight">{app.name}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
                         {app.description}
                       </p>
-                      {parseTools(app.tools).length > 0 ? (
-                        <span className="text-[11px] text-muted-foreground/60">
-                          {parseTools(app.tools).length} 个命令
-                        </span>
-                      ) : null}
-                    </CardContent>
-                    <CardFooter className="pt-0 pb-4 flex justify-end border-t border-border/40">
-                      <Button
-                        size="sm"
-                        onClick={() => navigate(`/dashboard/accounts/${id}/install/${app.id}`)}
-                        className="gap-1.5"
-                      >
-                        安装 <Download className="h-3.5 w-3.5" />
-                      </Button>
-                    </CardFooter>
-                  </Card>
+                    </div>
+                    {parseTools(app.tools).length > 0 ? (
+                      <span className="text-[11px] text-muted-foreground/50 shrink-0 hidden sm:block">
+                        {parseTools(app.tools).length} 个命令
+                      </span>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 gap-1.5"
+                      onClick={() => navigate(`/dashboard/accounts/${id}/install/${app.id}`)}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      安装
+                    </Button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -377,52 +371,38 @@ export function BotDetailPage() {
 
           {/* Listed Apps */}
           {!marketplaceLoading && listedApps.length > 0 ? (
-            <div className="space-y-3">
-              <h3 className="text-xs text-muted-foreground/60">推荐应用</h3>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <h3 className="text-xs text-muted-foreground/60 px-1">推荐应用</h3>
+              <div className="divide-y divide-border/50 rounded-xl border border-border/50 overflow-hidden">
                 {listedApps.map((app: any) => (
-                  <Card
+                  <div
                     key={app.id}
-                    className="group border-border/50 transition-all hover:border-primary/20 hover:shadow-md"
+                    className="group flex items-center gap-4 px-4 py-3.5 bg-card hover:bg-muted/40 transition-colors"
                   >
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start gap-3">
-                        <AppIcon icon={app.icon} iconUrl={app.icon_url} />
-                        <div className="min-w-0 space-y-1 pt-0.5">
-                          <CardTitle className="text-base font-semibold truncate group-hover:text-primary transition-colors">
-                            {app.name}
-                          </CardTitle>
-                          {app.version ? (
-                            <Badge variant="outline" className="text-[10px] font-mono">
-                              v{app.version}
-                            </Badge>
-                          ) : null}
-                        </div>
+                    <AppIcon icon={app.icon} iconUrl={app.icon_url} size="h-9 w-9" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold leading-tight truncate">{app.name}</p>
+                        {app.version ? (
+                          <Badge variant="outline" className="text-[10px] font-mono shrink-0">
+                            v{app.version}
+                          </Badge>
+                        ) : null}
                       </div>
-                    </CardHeader>
-                    <CardContent className="pb-4 space-y-2">
-                      <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
                         {app.description}
                       </p>
-                      {app.tools?.length > 0 ? (
-                        <p className="text-[11px] text-muted-foreground/60">
-                          {typeof app.tools === "string"
-                            ? JSON.parse(app.tools).length
-                            : app.tools.length}{" "}
-                          个命令
-                        </p>
-                      ) : null}
-                    </CardContent>
-                    <CardFooter className="pt-0 pb-4 border-t border-border/40">
-                      <Button
-                        size="sm"
-                        onClick={() => navigate(`/dashboard/accounts/${id}/install/${app.id}`)}
-                        className="gap-1.5"
-                      >
-                        安装 <Download className="h-3.5 w-3.5" />
-                      </Button>
-                    </CardFooter>
-                  </Card>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 gap-1.5"
+                      onClick={() => navigate(`/dashboard/accounts/${id}/install/${app.id}`)}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      安装
+                    </Button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -430,79 +410,64 @@ export function BotDetailPage() {
 
           {/* Marketplace Apps */}
           {!marketplaceLoading && marketplaceApps.length > 0 ? (
-            <div className="space-y-3">
-              <h3 className="text-xs text-muted-foreground/60">远程市场</h3>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <h3 className="text-xs text-muted-foreground/60 px-1">远程市场</h3>
+              <div className="divide-y divide-border/50 rounded-xl border border-border/50 overflow-hidden">
                 {marketplaceApps.map((app) => (
-                  <Card
+                  <div
                     key={app.slug || app.id}
-                    className="group border-border/50 transition-all hover:border-primary/20 hover:shadow-md"
+                    className="group flex items-center gap-4 px-4 py-3.5 bg-card hover:bg-muted/40 transition-colors"
                   >
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start gap-3">
-                        <AppIcon icon={app.icon} iconUrl={app.icon_url} />
-                        <div className="min-w-0 space-y-1 pt-0.5">
-                          <CardTitle className="text-base font-semibold truncate group-hover:text-primary transition-colors">
-                            {app.name}
-                          </CardTitle>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {app.author ? (
-                              <span className="text-[11px] text-muted-foreground">
-                                {app.author}
-                              </span>
-                            ) : null}
-                            {app.version ? (
-                              <Badge variant="outline" className="text-[10px] font-mono">
-                                v{app.version}
-                              </Badge>
-                            ) : null}
-                            {app.installed ? (
-                              <Badge variant="secondary" className="text-[10px]">
-                                已安装
-                              </Badge>
-                            ) : null}
-                          </div>
-                        </div>
+                    <AppIcon icon={app.icon} iconUrl={app.icon_url} size="h-9 w-9" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold leading-tight truncate">{app.name}</p>
+                        {app.version ? (
+                          <Badge variant="outline" className="text-[10px] font-mono shrink-0">
+                            v{app.version}
+                          </Badge>
+                        ) : null}
+                        {app.installed ? (
+                          <Badge variant="secondary" className="text-[10px] shrink-0">
+                            已安装
+                          </Badge>
+                        ) : null}
                       </div>
-                    </CardHeader>
-                    <CardContent className="pb-4">
-                      <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 min-h-[2.5rem]">
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
                         {app.description || "暂无描述"}
                       </p>
-                      {parseTools(app.tools).length > 0 ? (
-                        <span className="text-[11px] text-muted-foreground/60 mt-1 inline-block">
-                          {parseTools(app.tools).length} 个命令
-                        </span>
-                      ) : null}
-                    </CardContent>
-                    <CardFooter className="pt-0 pb-4 flex justify-between items-center border-t border-border/40">
-                      <span className="text-[11px] text-muted-foreground/60">
-                        {app.author || app.slug}
+                    </div>
+                    {app.author ? (
+                      <span className="text-[11px] text-muted-foreground/50 shrink-0 hidden sm:block">
+                        {app.author}
                       </span>
-                      {app.installed && app.update_available ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={syncing}
-                          onClick={() => handleInstallApp(app)}
-                          className="gap-1.5"
-                        >
-                          更新 <RefreshCw className="h-3.5 w-3.5" />
-                        </Button>
-                      ) : app.installed ? (
-                        <Badge variant="secondary">已安装</Badge>
-                      ) : (
-                        <Button
-                          size="sm"
-                          disabled={syncing}
-                          onClick={() => handleInstallApp(app)}
-                          className="gap-1.5"
-                        >
-                          安装 <Download className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </CardFooter>
-                  </Card>
+                    ) : null}
+                    {app.installed && app.update_available ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 gap-1.5"
+                        disabled={syncing}
+                        onClick={() => handleInstallApp(app)}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        更新
+                      </Button>
+                    ) : app.installed ? (
+                      <span className="text-[11px] text-muted-foreground/50 shrink-0">已安装</span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 gap-1.5"
+                        disabled={syncing}
+                        onClick={() => handleInstallApp(app)}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        安装
+                      </Button>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
