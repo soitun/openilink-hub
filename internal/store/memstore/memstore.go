@@ -115,7 +115,8 @@ func (s *Store) GetBot(id string) (*store.Bot, error) {
 	if !ok {
 		return nil, fmt.Errorf("bot %s not found", id)
 	}
-	return b, nil
+	copy := *b
+	return &copy, nil
 }
 
 func (s *Store) GetAllBots() ([]store.Bot, error) {
@@ -149,10 +150,13 @@ func (s *Store) IncrBotMsgCount(id string) error {
 func (s *Store) ListRecentContacts(botID string, limit int) ([]store.RecentContact, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if len(s.contacts) <= limit {
-		return s.contacts, nil
+	n := len(s.contacts)
+	if n > limit {
+		n = limit
 	}
-	return s.contacts[:limit], nil
+	out := make([]store.RecentContact, n)
+	copy(out, s.contacts[:n])
+	return out, nil
 }
 
 func (s *Store) ListBotsByUser(string) ([]store.Bot, error)                      { return nil, nil }
@@ -227,7 +231,8 @@ func (s *Store) GetApp(id string) (*store.App, error) {
 	if !ok {
 		return nil, fmt.Errorf("app %s not found", id)
 	}
-	return a, nil
+	cp := *a
+	return &cp, nil
 }
 
 func (s *Store) GetInstallationByToken(token string) (*store.AppInstallation, error) {
@@ -241,7 +246,8 @@ func (s *Store) GetInstallationByToken(token string) (*store.AppInstallation, er
 	if !ok {
 		return nil, fmt.Errorf("installation not found")
 	}
-	return inst, nil
+	cp := *inst
+	return &cp, nil
 }
 
 func (s *Store) GetInstallationByHandle(botID, handle string) (*store.AppInstallation, error) {
@@ -255,7 +261,8 @@ func (s *Store) GetInstallationByHandle(botID, handle string) (*store.AppInstall
 	if !ok {
 		return nil, fmt.Errorf("installation not found")
 	}
-	return inst, nil
+	cp := *inst
+	return &cp, nil
 }
 
 func (s *Store) ListInstallationsByBot(botID string) ([]store.AppInstallation, error) {
@@ -295,7 +302,8 @@ func (s *Store) GetInstallation(id string) (*store.AppInstallation, error) {
 	if !ok {
 		return nil, fmt.Errorf("installation %s not found", id)
 	}
-	return inst, nil
+	cp := *inst
+	return &cp, nil
 }
 
 func (s *Store) CreateApp(*store.App) (*store.App, error) { return nil, errNotImplemented }

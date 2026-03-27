@@ -341,7 +341,7 @@ Per-app:          GET /bot/v1/app/ws?app_id={app_id}&secret={webhook_secret}
 #### Messages (Server -> Client)
 
 ```jsonc
-{"type": "init", "data": {"installation_id": "...", "bot_id": "...", "app_slug": "..."}}
+{"type": "init", "data": {"installation_id": "...", "bot_id": "...", "app_name": "...", "app_slug": "..."}}
 {"type": "event", "v": 1, "trace_id": "tr_xxx", "installation_id": "inst_xxx", "bot": {"id": "bot_xxx"}, "event": {...}}
 {"type": "ack", "req_id": "r1", "ok": true}
 {"type": "error", "req_id": "r1", "error": "..."}
