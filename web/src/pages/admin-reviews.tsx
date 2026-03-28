@@ -223,9 +223,9 @@ export function AdminReviewsPage() {
       </div>
 
       {/* Main content */}
-      <div id="review-tabpanel" role="tabpanel" aria-labelledby={`tab-${tab}`} className="flex flex-col md:flex-row gap-6 min-h-[calc(100vh-16rem)]">
+      <div id="review-tabpanel" role="tabpanel" aria-labelledby={`tab-${tab}`} className="flex flex-col md:flex-row gap-4">
         {/* Left: App Queue */}
-        <div className="md:w-72 shrink-0 space-y-1 overflow-y-auto max-h-[50vh] md:max-h-none">
+        <div className="md:w-64 shrink-0 space-y-0.5 overflow-y-auto max-h-[50vh] md:max-h-[calc(100vh-14rem)]">
           {loading ? (
             <div className="space-y-1">
               {[1, 2, 3].map((i) => (
@@ -239,8 +239,8 @@ export function AdminReviewsPage() {
               ))}
             </div>
           ) : sorted.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-              <Inbox className="h-10 w-10 mb-3 opacity-30" />
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <Inbox className="h-8 w-8 mb-2 opacity-30" />
               <p className="text-sm">{tab === "pending" ? "无待审核应用" : "暂无记录"}</p>
             </div>
           ) : (
@@ -273,14 +273,14 @@ export function AdminReviewsPage() {
         {/* Right: Detail Panel */}
         <div className="flex-1 min-w-0">
           {selected ? (
-            <div className="rounded-xl border border-border/50 bg-card md:sticky md:top-6 md:max-h-[calc(100vh-12rem)] flex flex-col">
+            <div className="rounded-xl border border-border/50 bg-card md:sticky md:top-6 md:max-h-[calc(100vh-14rem)] flex flex-col">
               {/* Scrollable content */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 {/* Header */}
-                <div className="flex items-start gap-4">
-                  <AppIcon icon={selected.icon} iconUrl={selected.icon_url} size="h-12 w-12" />
+                <div className="flex items-start gap-3">
+                  <AppIcon icon={selected.icon} iconUrl={selected.icon_url} size="h-10 w-10" />
                   <div className="flex-1 min-w-0">
-                    <h2 className="text-lg font-bold leading-tight">{selected.name}</h2>
+                    <h2 className="text-base font-bold leading-tight">{selected.name}</h2>
                     <div className="flex items-center gap-2 mt-0.5">
                       <p className="text-xs text-muted-foreground font-mono">{selected.slug}</p>
                       {selected.version && (
@@ -439,7 +439,7 @@ export function AdminReviewsPage() {
               </div>
 
               {/* Sticky action buttons */}
-              <div className="border-t p-4 shrink-0 bg-card rounded-b-xl">
+              <div className="border-t px-5 py-3 shrink-0 bg-card rounded-b-xl">
                 {selected.listing === "pending" ? (
                   <div className="flex gap-3">
                     <Button
@@ -480,8 +480,8 @@ export function AdminReviewsPage() {
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <Inbox className="h-12 w-12 mb-3 opacity-20" />
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+              <Inbox className="h-10 w-10 mb-3 opacity-20" />
               <p className="text-sm">选择一个应用查看详情</p>
             </div>
           )}
