@@ -364,7 +364,11 @@ func (s *Server) handleSetOIDCConfig(w http.ResponseWriter, r *http.Request) {
 		UserInfoURL:  userinfoURL,
 	}
 
-	data, _ := json.Marshal(cfg)
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	if err := s.Store.SetConfig("oidc."+slug+".config", string(data)); err != nil {
 		jsonError(w, "save failed", http.StatusInternalServerError)
 		return
