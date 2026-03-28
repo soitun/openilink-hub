@@ -202,6 +202,8 @@ func (s *Server) handleOIDCRedirect(w http.ResponseWriter, r *http.Request, slug
 	scopes := cfg.Scopes
 	if scopes == "" {
 		scopes = "openid profile email"
+	} else if !strings.Contains(scopes, "openid") {
+		scopes = "openid " + scopes
 	}
 	params.Set("scope", scopes)
 
@@ -318,8 +320,8 @@ func (s *Server) handleSetOIDCConfig(w http.ResponseWriter, r *http.Request) {
 				jsonError(w, "cannot change issuer_url for existing provider; delete and recreate instead", http.StatusBadRequest)
 				return
 			}
-			// Preserve existing secret if masked value is sent back
-			if req.ClientSecret != "" && req.ClientSecret == maskSecret(existing.ClientSecret) {
+			// Preserve existing secret if omitted or masked value is sent back
+			if req.ClientSecret == "" || req.ClientSecret == maskSecret(existing.ClientSecret) {
 				req.ClientSecret = existing.ClientSecret
 			}
 		}
