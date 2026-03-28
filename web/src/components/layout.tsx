@@ -87,7 +87,14 @@ const BREADCRUMB_LABELS: Record<string, string> = {
   reviews: "审核中心",
   traces: "消息追踪",
   developer: "开发者",
+  install: "安装应用",
+  console: "控制台",
+  onboarding: "引导",
 };
+
+// Intermediate-only segments that are NOT standalone routes.
+// These are skipped in breadcrumbs when followed by a dynamic ID.
+const BREADCRUMB_SKIP = new Set(["apps", "install"]);
 
 const statusColors: Record<string, string> = {
   connected: "text-green-500 fill-green-500",
@@ -121,9 +128,8 @@ function LayoutHeader() {
   for (let i = 0; i < rawSegments.length; i++) {
     const segment = rawSegments[i];
     const path = `/dashboard/${rawSegments.slice(0, i + 1).join("/")}`;
-    // Skip intermediate named segments followed by a dynamic ID
-    // e.g. "apps" in /accounts/:id/apps/:iid — not a standalone route
-    if (i > 0 && i < rawSegments.length - 1 && BREADCRUMB_LABELS[segment] && rawSegments[i + 1]?.length > 20) {
+    // Skip intermediate-only segments (e.g. "apps" in /accounts/:id/apps/:iid)
+    if (BREADCRUMB_SKIP.has(segment) && i > 0 && i < rawSegments.length - 1) {
       continue;
     }
     let label = BREADCRUMB_LABELS[segment] || segment;
