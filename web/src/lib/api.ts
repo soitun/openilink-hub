@@ -58,7 +58,7 @@ export const api = {
       ) as Array<{ name: string; display_name: string; type: string; key?: string }>,
     })),
   me: () =>
-    request<{ id: string; username: string; display_name: string; role: string }>("/api/me"),
+    request<{ id: string; username: string; display_name: string; role: string; email?: string; has_password: boolean; has_passkey: boolean; has_oauth: boolean }>("/api/me"),
   info: () => request<{ ai: boolean; registration_enabled: boolean }>("/api/info"),
 
   // Passkeys

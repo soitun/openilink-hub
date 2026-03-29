@@ -1,5 +1,8 @@
 import { Outlet, useNavigate, Link, useLocation } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
+import { useUser } from "@/hooks/use-auth";
+import { useBots } from "@/hooks/use-bots";
+import { useAuthStore } from "@/stores/auth-store";
 import logoBlack from "@/assets/logo-black.svg";
 import logoWhite from "@/assets/logo-white.svg";
 import iconBlack from "@/assets/icon-black.svg";
@@ -264,33 +267,12 @@ function SecurityBanner() {
 export function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [user, setUser] = useState<any>(null);
-  const [bots, setBots] = useState<any[]>([]);
+  const { data: user, isError } = useUser();
+  const { data: bots = [] } = useBots();
 
   useEffect(() => {
-    api
-      .me()
-      .then(setUser)
-      .catch(() => navigate("/login", { replace: true }));
-  }, []);
-
-  useEffect(() => {
-    if (user)
-      api
-        .listBots()
-        .then((b) => setBots(b || []))
-        .catch(() => {});
-  }, [user]);
-
-  // Refresh bot list when navigating back to accounts area
-  useEffect(() => {
-    if (user && location.pathname.startsWith("/dashboard/accounts")) {
-      api
-        .listBots()
-        .then((b) => setBots(b || []))
-        .catch(() => {});
-    }
-  }, [location.pathname]);
+    if (isError) navigate("/login", { replace: true });
+  }, [isError, navigate]);
 
   if (!user) return null;
 
@@ -506,7 +488,7 @@ export function Layout() {
                 >
                   <DropdownMenuItem
                     onClick={async () => {
-                      await api.logout();
+                      await useAuthStore.getState().logout();
                       navigate("/login");
                     }}
                     className="cursor-pointer font-medium text-destructive focus:bg-destructive/10 focus:text-destructive"
