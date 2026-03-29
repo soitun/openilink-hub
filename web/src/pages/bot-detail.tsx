@@ -22,7 +22,7 @@ import { api, botDisplayName } from "../lib/api";
 import { useBot, useBotApps, useUpdateBot, useSetBotAI, useSetBotAIModel } from "@/hooks/use-bots";
 import { useApps } from "@/hooks/use-apps";
 import { useAvailableModels } from "@/hooks/use-apps";
-import { useBuiltinApps, useMarketplaceApps } from "@/hooks/use-marketplace";
+import { useBuiltinApps, useMarketplaceApps, useSyncMarketplaceApp } from "@/hooks/use-marketplace";
 import { Card, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
@@ -77,6 +77,7 @@ export function BotDetailPage() {
   const updateBotMutation = useUpdateBot();
   const setAIMutation = useSetBotAI();
   const setAIModelMutation = useSetBotAIModel();
+  const syncAppMutation = useSyncMarketplaceApp();
 
   // Local UI state
   const [syncing, setSyncing] = useState(false);
@@ -95,19 +96,16 @@ export function BotDetailPage() {
   };
 
   const handleInstallApp = async (app: any) => {
-    setSyncing(true);
-    try {
-      if (app.local_id) {
-        navigate(`/dashboard/accounts/${id}/install/${app.local_id}`);
-      } else {
-        const synced = await api.syncMarketplaceApp(app.slug);
-        navigate(`/dashboard/accounts/${id}/install/${synced.id}`);
-      }
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "同步失败", description: e.message });
-    } finally {
-      setSyncing(false);
+    if (app.local_id) {
+      navigate(`/dashboard/accounts/${id}/install/${app.local_id}`);
+      return;
     }
+    setSyncing(true);
+    syncAppMutation.mutate(app.slug, {
+      onSuccess: (synced: any) => navigate(`/dashboard/accounts/${id}/install/${synced.id}`),
+      onError: (e) => toast({ variant: "destructive", title: "同步失败", description: e.message }),
+      onSettled: () => setSyncing(false),
+    });
   };
 
   if (loading)

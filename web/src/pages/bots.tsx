@@ -48,7 +48,8 @@ const statusConfig: Record<
 };
 
 export function BotsPage() {
-  const { data: bots = [], isLoading: loading, refetch } = useBots();
+  const { data: bots = [], isLoading, isFetching, refetch } = useBots();
+  const loading = isLoading || isFetching;
   const [binding, setBinding] = useState(false);
   const [qrUrl, setQrUrl] = useState("");
   const [bindStatus, setBindStatus] = useState("");

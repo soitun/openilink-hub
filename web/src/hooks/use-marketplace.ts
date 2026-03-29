@@ -5,7 +5,7 @@ import { queryKeys } from "@/lib/query-keys";
 export function useMarketplaceApps() {
   return useQuery({
     queryKey: queryKeys.marketplace.apps(),
-    queryFn: () => api.getMarketplaceApps().catch(() => []),
+    queryFn: () => api.getMarketplaceApps(),
     staleTime: 60_000,
   });
 }
@@ -13,7 +13,7 @@ export function useMarketplaceApps() {
 export function useBuiltinApps() {
   return useQuery({
     queryKey: queryKeys.marketplace.builtin(),
-    queryFn: () => api.getBuiltinApps().catch(() => []),
+    queryFn: () => api.getBuiltinApps(),
     staleTime: 60_000,
   });
 }
