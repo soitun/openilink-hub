@@ -52,6 +52,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -269,10 +271,15 @@ export function Layout() {
   const location = useLocation();
   const { data: user, isError } = useUser();
   const { data: bots = [] } = useBots();
+  const [version, setVersion] = useState("");
 
   useEffect(() => {
     if (isError) navigate("/login", { replace: true });
   }, [isError, navigate]);
+
+  useEffect(() => {
+    api.info().then((data) => setVersion(data.version || "")).catch(() => {});
+  }, []);
 
   if (!user) return null;
 
@@ -496,6 +503,14 @@ export function Layout() {
                     <LogOut className="mr-2 h-4 w-4" />
                     退出登录
                   </DropdownMenuItem>
+                  {version && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-[10px] text-muted-foreground text-center font-normal">
+                        {/^\d/.test(version) ? `v${version}` : version}
+                      </DropdownMenuLabel>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </SidebarMenuItem>
