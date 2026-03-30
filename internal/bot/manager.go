@@ -11,6 +11,7 @@ import (
 
 	appdelivery "github.com/openilink/openilink-hub/internal/app"
 	"github.com/openilink/openilink-hub/internal/provider"
+	"github.com/openilink/openilink-hub/internal/push"
 	"github.com/openilink/openilink-hub/internal/relay"
 	"github.com/openilink/openilink-hub/internal/sink"
 	"github.com/openilink/openilink-hub/internal/storage"
@@ -31,6 +32,7 @@ type Manager struct {
 	dlSem     chan struct{}        // semaphore for concurrent media downloads
 	appDisp   *appdelivery.Dispatcher // app event delivery
 	appWSHub  *appdelivery.WSHub      // app WebSocket connections
+	pushHub   *push.Hub               // browser push WebSocket
 }
 
 func NewManager(s store.Store, hub *relay.Hub, aiSink *sink.AI, st storage.Store, baseURL string) *Manager {
@@ -44,6 +46,11 @@ func NewManager(s store.Store, hub *relay.Hub, aiSink *sink.AI, st storage.Store
 		dlSem:     make(chan struct{}, maxConcurrentDownloads),
 		appDisp:   appdelivery.NewDispatcher(s),
 	}
+}
+
+// SetPushHub sets the browser push WebSocket hub.
+func (m *Manager) SetPushHub(hub *push.Hub) {
+	m.pushHub = hub
 }
 
 // SetAppWSHub sets the WebSocket hub for app installations.
@@ -92,6 +99,7 @@ func (m *Manager) StartBot(ctx context.Context, bot *store.Bot) error {
 
 	p := factory()
 	inst := NewInstance(bot.ID, p)
+	inst.UserID = bot.UserID
 	inst.AIEnabled = bot.AIEnabled
 	inst.AIModel = bot.AIModel
 
@@ -316,6 +324,13 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 		"message.id":      msg.ExternalID,
 	})
 
+	// Ensure trace is flushed and browser clients notified even on panic.
+	defer func() {
+		rootSpan.End()
+		tracer.Flush()
+		m.notifyPush(inst, tracer.TraceID())
+	}()
+
 	storeSpan := tracer.StartChild(rootSpan, "store", store.SpanKindInternal, map[string]any{
 		"message.db_id": msgID,
 	})
@@ -326,7 +341,6 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 		go m.downloadMedia(inst, msg, msgID)
 		rootSpan.AddEvent("media_download_started", nil)
 	}
-
 
 	// Show typing indicator while delivering.
 	typingDone := m.startTyping(inst, msg)
@@ -352,10 +366,20 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 	if err := m.store.MarkProcessed(msgID); err != nil {
 		slog.Error("mark processed failed", "bot", inst.DBID, "msg", msgID, "err", err)
 	}
+}
 
-	// End root span and flush all spans to DB
-	rootSpan.End()
-	tracer.Flush()
+// notifyPush sends trace_completed and message_new events to browser clients.
+func (m *Manager) notifyPush(inst *Instance, traceID string) {
+	if m.pushHub == nil || inst.UserID == "" {
+		return
+	}
+	m.pushHub.Notify(inst.UserID, inst.DBID, push.NewEnvelope(push.EventTraceCompleted, push.BotEvent{
+		BotID:   inst.DBID,
+		TraceID: traceID,
+	}))
+	m.pushHub.Notify(inst.UserID, inst.DBID, push.NewEnvelope(push.EventMessageNew, push.BotEvent{
+		BotID: inst.DBID,
+	}))
 }
 
 // parsedMessage holds extracted info from an inbound message.
@@ -536,6 +560,7 @@ func (m *Manager) recoverUnprocessed(inst *Instance) {
 		rwg.Wait()
 		rootSpan.End()
 		tracer.Flush()
+		m.notifyPush(inst, tracer.TraceID())
 
 		if err := m.store.MarkProcessed(msgs[i].ID); err != nil {
 			slog.Error("mark recovered msg processed failed", "id", msgs[i].ID, "err", err)
