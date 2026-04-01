@@ -77,9 +77,10 @@ export function BotDetailPage() {
   const { data: marketplaceApps = [] } = useMarketplaceApps();
   const { data: availableModels = [] } = useAvailableModels();
 
-  // Derived: listed apps excluding builtins
+  // Derived: listed apps excluding builtins, installed app IDs for this bot
   const builtinSlugs = new Set(builtinApps.map((a: any) => a.slug));
   const listedApps = listedAppsRaw.filter((a: any) => !builtinSlugs.has(a.slug));
+  const installedOnBot = new Set(installations.map((inst: any) => inst.app_id));
   const marketplaceLoading = false; // All queries load in parallel, handled by isLoading above
 
   // Mutations
@@ -479,7 +480,14 @@ export function BotDetailPage() {
                   >
                     <AppIcon icon={app.icon} iconUrl={app.icon_url} size="h-9 w-9" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold leading-tight">{app.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold leading-tight">{app.name}</p>
+                        {installedOnBot.has(app.id) ? (
+                          <Badge variant="secondary" className="text-[10px] shrink-0">
+                            已安装
+                          </Badge>
+                        ) : null}
+                      </div>
                       <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
                         {app.description}
                       </p>
@@ -489,15 +497,19 @@ export function BotDetailPage() {
                         {parseTools(app.tools).length} 个命令
                       </span>
                     ) : null}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="shrink-0 gap-1.5"
-                      onClick={() => navigate(`/dashboard/accounts/${id}/install/${app.id}`)}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      安装
-                    </Button>
+                    {installedOnBot.has(app.id) ? (
+                      <span className="text-[11px] text-muted-foreground/50 shrink-0">已安装</span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 gap-1.5"
+                        onClick={() => navigate(`/dashboard/accounts/${id}/install/${app.id}`)}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        安装
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -523,20 +535,29 @@ export function BotDetailPage() {
                             v{app.version}
                           </Badge>
                         ) : null}
+                        {installedOnBot.has(app.id) ? (
+                          <Badge variant="secondary" className="text-[10px] shrink-0">
+                            已安装
+                          </Badge>
+                        ) : null}
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
                         {app.description}
                       </p>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="shrink-0 gap-1.5"
-                      onClick={() => navigate(`/dashboard/accounts/${id}/install/${app.id}`)}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      安装
-                    </Button>
+                    {installedOnBot.has(app.id) ? (
+                      <span className="text-[11px] text-muted-foreground/50 shrink-0">已安装</span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 gap-1.5"
+                        onClick={() => navigate(`/dashboard/accounts/${id}/install/${app.id}`)}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        安装
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
