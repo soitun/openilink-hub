@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	appdelivery "github.com/openilink/openilink-hub/internal/app"
 	"github.com/openilink/openilink-hub/internal/builtin"
 	"github.com/openilink/openilink-hub/internal/provider"
+	"github.com/openilink/openilink-hub/internal/relay"
 	"github.com/openilink/openilink-hub/internal/store"
 )
 
@@ -52,13 +54,15 @@ func (m *Manager) deliverToApps(inst *Instance, msg provider.InboundMessage, p p
 		return
 	}
 
+	resolvedItems := resolveMediaURLs(p.relayItems, m.baseURL, inst.DBID)
+
 	event := appdelivery.NewEvent(eventType, map[string]any{
 		"message_id": msg.ExternalID,
 		"sender":     map[string]any{"id": msg.Sender, "role": "user"},
 		"group":      groupInfo(msg),
 		"content":    content,
 		"msg_type":   p.msgType,
-		"items":      p.relayItems,
+		"items":      resolvedItems,
 	})
 	event.TraceID = tracer.TraceID()
 
@@ -618,3 +622,38 @@ func detectOutboundExt(filename, msgType string) string {
 		return ""
 	}
 }
+
+// resolveMediaURLs returns a copy of items with raw CDN URLs replaced by
+// Hub proxy URLs so external apps can fetch media. Items without EQP
+// (already processed or text-only) are left unchanged.
+// RefMsg is handled one level deep, which matches WeChat's quoting model.
+func resolveMediaURLs(items []relay.MessageItem, baseURL, botDBID string) []relay.MessageItem {
+	out := make([]relay.MessageItem, len(items))
+	copy(out, items)
+	for i := range out {
+		resolveItemMedia(&out[i], baseURL, botDBID)
+		if out[i].RefMsg != nil {
+			ref := *out[i].RefMsg
+			resolveItemMedia(&ref.Item, baseURL, botDBID)
+			out[i].RefMsg = &ref
+		}
+	}
+	return out
+}
+
+func resolveItemMedia(item *relay.MessageItem, baseURL, botDBID string) {
+	if item.Media == nil || item.Media.EQP == "" {
+		return
+	}
+	m := *item.Media
+	q := url.Values{}
+	q.Set("bot", botDBID)
+	q.Set("eqp", m.EQP)
+	q.Set("aes", m.AESKey)
+	q.Set("ct", mediaContentType(item.Type))
+	m.URL = fmt.Sprintf("%s/api/v1/channels/media?%s", baseURL, q.Encode())
+	m.EQP = ""
+	m.AESKey = ""
+	item.Media = &m
+}
+
