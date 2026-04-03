@@ -639,10 +639,6 @@ func (s *Server) requireAppForInstall(w http.ResponseWriter, r *http.Request) *s
 // moderation actions (e.g. emergency takedown, re-listing without re-review).
 func (s *Server) handleAdminSetListing(w http.ResponseWriter, r *http.Request) {
 	appID := r.PathValue("id")
-	if _, err := s.Store.GetApp(appID); err != nil {
-		jsonError(w, "app not found", http.StatusNotFound)
-		return
-	}
 	var req struct {
 		Listing string `json:"listing"`
 	}
