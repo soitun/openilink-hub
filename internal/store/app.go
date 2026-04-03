@@ -78,6 +78,29 @@ type AppReview struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
+type AppUpdate struct {
+	Name             string
+	Description      string
+	Icon             string
+	IconURL          string
+	Homepage         string
+	OAuthSetupURL    string
+	OAuthRedirectURL string
+	WebhookURL       string
+	ConfigSchema     string
+	Version          string
+	Readme           string
+	Guide            string
+	Tools            json.RawMessage
+	Events           json.RawMessage
+	Scopes           json.RawMessage
+}
+
+type AppUpdateResult struct {
+	Listing      string
+	Transitioned bool
+}
+
 type AppStore interface {
 	CreateApp(app *App) (*App, error)
 	GetApp(id string) (*App, error)
@@ -87,6 +110,7 @@ type AppStore interface {
 	ListAllApps() ([]App, error)
 	ListMarketplaceApps() ([]App, error)
 	UpdateApp(id string, name, description, icon, iconURL, homepage, oauthSetupURL, oauthRedirectURL, configSchema, version, readme, guide string, tools, events, scopes json.RawMessage) error
+	UpdateAppWithTransition(id string, update AppUpdate, nextListing string) (AppUpdateResult, error)
 	UpdateMarketplaceApp(id, name, description, iconURL, homepage, webhookURL, oauthSetupURL, oauthRedirectURL, version, readme, guide string, tools, events, scopes json.RawMessage) error
 	DeleteApp(id string) error
 	InstallApp(appID, botID string) (*AppInstallation, error)

@@ -1996,9 +1996,9 @@ func TestUpdateListedAppWithEquivalentJSONDoesNotUnlist(t *testing.T) {
 		Description:  "listed app",
 		Listing:      "listed",
 		Tools:        json.RawMessage(`[{"name":"tool","description":"Tool"}]`),
-		Events:       json.RawMessage(`["message"]`),
-		Scopes:       json.RawMessage(`["message:read"]`),
-		ConfigSchema: `{"type":"object"}`,
+		Events:       json.RawMessage(`["reaction.added","message"]`),
+		Scopes:       json.RawMessage(`["message:write","message:read"]`),
+		ConfigSchema: `{"properties":{"name":{"type":"string"}},"type":"object"}`,
 		Version:      "1.0.0",
 	})
 	if err != nil {
@@ -2012,9 +2012,9 @@ func TestUpdateListedAppWithEquivalentJSONDoesNotUnlist(t *testing.T) {
 
 	resp := doJSON(t, env.ts, "PUT", "/api/apps/"+app.ID, map[string]any{
 		"tools":         []map[string]any{{"description": "Tool", "name": "tool"}},
-		"events":        []string{"message"},
-		"scopes":        []string{"message:read"},
-		"config_schema": "{\n  \"type\": \"object\"\n}",
+		"events":        []string{"message", "reaction.added", "message"},
+		"scopes":        []string{"message:read", "message:write", "message:read"},
+		"config_schema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"name\": {\n      \"type\": \"string\"\n    }\n  }\n}",
 		"version":       "1.0.0",
 	}, withCookie(env.cookie))
 	defer resp.Body.Close()

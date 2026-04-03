@@ -369,6 +369,48 @@ func (s *Store) ListMarketplaceApps() ([]store.App, error)       { return nil, n
 func (s *Store) UpdateApp(string, string, string, string, string, string, string, string, string, string, string, string, json.RawMessage, json.RawMessage, json.RawMessage) error {
 	return nil
 }
+func (s *Store) UpdateAppWithTransition(id string, update store.AppUpdate, nextListing string) (store.AppUpdateResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	app, ok := s.apps[id]
+	if !ok {
+		return store.AppUpdateResult{}, fmt.Errorf("app %s not found", id)
+	}
+
+	currentListing := app.Listing
+	webhookChanged := app.WebhookURL != update.WebhookURL
+
+	app.Name = update.Name
+	app.Description = update.Description
+	app.Icon = update.Icon
+	app.IconURL = update.IconURL
+	app.Homepage = update.Homepage
+	app.OAuthSetupURL = update.OAuthSetupURL
+	app.OAuthRedirectURL = update.OAuthRedirectURL
+	app.WebhookURL = update.WebhookURL
+	app.ConfigSchema = update.ConfigSchema
+	app.Version = update.Version
+	app.Readme = update.Readme
+	app.Guide = update.Guide
+	app.Tools = update.Tools
+	app.Events = update.Events
+	app.Scopes = update.Scopes
+	if webhookChanged {
+		app.WebhookVerified = false
+	}
+
+	result := store.AppUpdateResult{Listing: currentListing}
+	if currentListing == "listed" && nextListing != "" && nextListing != "listed" {
+		s.deleteInstallationsByAppIDLocked(id)
+		app.Listing = nextListing
+		app.ListingRejectReason = ""
+		result.Listing = nextListing
+		result.Transitioned = true
+	}
+
+	return result, nil
+}
 func (s *Store) UpdateMarketplaceApp(string, string, string, string, string, string, string, string, string, string, string, json.RawMessage, json.RawMessage, json.RawMessage) error {
 	return nil
 }

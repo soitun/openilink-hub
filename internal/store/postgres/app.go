@@ -223,6 +223,47 @@ func (db *DB) UpdateApp(id string, name, description, icon, iconURL, homepage, o
 	return err
 }
 
+func (db *DB) UpdateAppWithTransition(id string, update store.AppUpdate, nextListing string) (store.AppUpdateResult, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return store.AppUpdateResult{}, err
+	}
+	defer tx.Rollback()
+
+	var currentListing string
+	if err := tx.QueryRow("SELECT listing FROM apps WHERE id = $1 FOR UPDATE", id).Scan(&currentListing); err != nil {
+		return store.AppUpdateResult{}, err
+	}
+
+	if _, err := tx.Exec(`UPDATE apps SET name=$1, description=$2, icon=$3, icon_url=$4, homepage=$5,
+		tools=$6, events=$7, scopes=$8, oauth_setup_url=$9, oauth_redirect_url=$10, webhook_url=$11,
+		webhook_verified=CASE WHEN webhook_url <> $11 THEN FALSE ELSE webhook_verified END,
+		config_schema=$12, version=$13, readme=$14, guide=$15, updated_at=$16 WHERE id=$17`,
+		update.Name, update.Description, update.Icon, update.IconURL, update.Homepage,
+		update.Tools, update.Events, update.Scopes, update.OAuthSetupURL, update.OAuthRedirectURL, update.WebhookURL,
+		update.ConfigSchema, update.Version, update.Readme, update.Guide, db.now(), id,
+	); err != nil {
+		return store.AppUpdateResult{}, err
+	}
+
+	result := store.AppUpdateResult{Listing: currentListing}
+	if currentListing == "listed" && nextListing != "" && nextListing != "listed" {
+		if _, err := tx.Exec("DELETE FROM app_installations WHERE app_id = $1", id); err != nil {
+			return store.AppUpdateResult{}, err
+		}
+		if _, err := tx.Exec("UPDATE apps SET listing=$1, listing_reject_reason='', updated_at=$2 WHERE id=$3", nextListing, db.now(), id); err != nil {
+			return store.AppUpdateResult{}, err
+		}
+		result.Listing = nextListing
+		result.Transitioned = true
+	}
+
+	if err := tx.Commit(); err != nil {
+		return store.AppUpdateResult{}, err
+	}
+	return result, nil
+}
+
 func (db *DB) UpdateMarketplaceApp(id, name, description, iconURL, homepage, webhookURL, oauthSetupURL, oauthRedirectURL, version, readme, guide string, tools, events, scopes json.RawMessage) error {
 	_, err := db.Exec(`UPDATE apps SET name=$1, description=$2, icon_url=$3, homepage=$4,
 		webhook_url=$5, oauth_setup_url=$6, oauth_redirect_url=$7, version=$8, readme=$9, guide=$10,
