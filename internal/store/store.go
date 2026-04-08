@@ -18,6 +18,5 @@ type Store interface {
 	WebhookLogStore
 	AppLogStore
 	SessionStore
-	CronStore
 	io.Closer
 }

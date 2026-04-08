@@ -13,7 +13,6 @@ export const queryKeys = {
     messages: (id: string, limit = 30, cursor?: string) =>
       ["bots", id, "messages", { limit, cursor }] as const,
     stats: () => ["bots", "stats"] as const,
-    cronJobs: (id: string) => ["bots", id, "cron-jobs"] as const,
     webhookLogs: (botId: string, channelId?: string, limit = 50) =>
       ["bots", botId, "webhook-logs", { channelId, limit }] as const,
   },

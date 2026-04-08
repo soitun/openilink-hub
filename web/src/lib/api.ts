@@ -122,20 +122,6 @@ export const api = {
     }),
   botContacts: (id: string) => request<any[]>(`/api/bots/${id}/contacts`),
 
-  // Cron jobs (scheduled tasks)
-  listCronJobs: (botId: string) => request<any[]>(`/api/bots/${botId}/cron-jobs`),
-  createCronJob: (
-    botId: string,
-    data: { name: string; cron_expr: string; message: string; recipient?: string },
-  ) => request<any>(`/api/bots/${botId}/cron-jobs`, { method: "POST", body: JSON.stringify(data) }),
-  updateCronJob: (botId: string, jobId: string, data: any) =>
-    request<any>(`/api/bots/${botId}/cron-jobs/${jobId}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
-  deleteCronJob: (botId: string, jobId: string) =>
-    request(`/api/bots/${botId}/cron-jobs/${jobId}`, { method: "DELETE" }),
-
   // Channels (under bots)
   listChannels: (botId: string) => request<any[]>(`/api/bots/${botId}/channels`),
   createChannel: (botId: string, name: string, handle?: string) =>

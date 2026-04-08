@@ -15,7 +15,6 @@ import {
   Pencil,
   Check,
   X,
-  Clock,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -49,8 +48,6 @@ import { Input } from "@/components/ui/input";
 import { AppIcon } from "../components/app-icon";
 import { parseTools } from "../components/tools-display";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { BotCronTab } from "./bot-cron-tab";
-
 const DEFAULT_MODEL = "__default__";
 
 // ==================== Page ====================
@@ -433,9 +430,6 @@ export function BotDetailPage() {
           </Tooltip>
         </div>
       </div>
-
-      {/* Cron Jobs (Scheduled Tasks) */}
-      <BotCronTab botId={id!} />
 
       {/* Installed Apps + Marketplace */}
       <>
