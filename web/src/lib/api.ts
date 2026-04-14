@@ -198,6 +198,13 @@ export const api = {
   deleteAIConfig: () => request("/api/admin/config/ai", { method: "DELETE" }),
 
   // Apps
+  importMCP: (data: { url: string; headers?: Record<string, string> }) =>
+    request<{
+      server_name?: string;
+      server_version?: string;
+      tools: Array<{ name: string; description: string; command?: string; parameters?: any }>;
+      truncated?: boolean;
+    }>("/api/apps/import-mcp", { method: "POST", body: JSON.stringify(data) }),
   createApp: (data: any) =>
     request<any>("/api/apps", { method: "POST", body: JSON.stringify(data) }),
   listApps: (opts?: { listing?: string }) =>
